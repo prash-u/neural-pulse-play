@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Sphere, Html } from "@react-three/drei";
+import { Html, OrbitControls, Sphere } from "@react-three/drei";
 import * as THREE from "three";
 import type { EEGRecording } from "@/lib/eeg/types";
 import { resolveElectrodePosition } from "@/lib/eeg/montage";
@@ -17,34 +17,99 @@ interface ElectrodeData {
   channelIdx: number;
 }
 
-function HeadMesh({ mode }: { mode: "headset" | "brain" }) {
+const ACTIVITY_COLOR = new THREE.Color("hsl(188, 100%, 70%)");
+const SECONDARY_ACTIVITY_COLOR = new THREE.Color("hsl(330, 88%, 72%)");
+const BASE_HEAD_COLOR = new THREE.Color("hsl(210, 70%, 35%)");
+const BASE_BRAIN_COLOR = new THREE.Color("hsl(340, 40%, 68%)");
+const BASE_CEREBELLUM_COLOR = new THREE.Color("hsl(340, 35%, 58%)");
+
+function ReactiveHeadMesh({
+  mode,
+  globalActivity,
+}: {
+  mode: "headset" | "brain";
+  globalActivity: number;
+}) {
+  const shellRef = useRef<THREE.Mesh>(null);
+  const shellMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const shellWireRef = useRef<THREE.MeshBasicMaterial>(null);
+  const leftHemisphereRef = useRef<THREE.Mesh>(null);
+  const rightHemisphereRef = useRef<THREE.Mesh>(null);
+  const cerebellumRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
+  const smoothedActivity = useRef(globalActivity);
+
+  useFrame((_state, delta) => {
+    smoothedActivity.current = THREE.MathUtils.damp(smoothedActivity.current, globalActivity, 7, delta);
+    const activity = smoothedActivity.current;
+
+    if (shellRef.current) {
+      shellRef.current.scale.setScalar(1 + activity * 0.045);
+    }
+    if (glowRef.current) {
+      glowRef.current.scale.setScalar(1 + activity * 0.12);
+    }
+    if (shellMaterialRef.current) {
+      shellMaterialRef.current.opacity = 0.22 + activity * 0.16;
+      shellMaterialRef.current.color.copy(BASE_HEAD_COLOR).lerp(ACTIVITY_COLOR, activity * 0.3);
+      shellMaterialRef.current.emissive.copy(ACTIVITY_COLOR);
+      shellMaterialRef.current.emissiveIntensity = 0.15 + activity * 1.4;
+    }
+    if (shellWireRef.current) {
+      shellWireRef.current.color.copy(ACTIVITY_COLOR);
+      shellWireRef.current.opacity = 0.16 + activity * 0.18;
+    }
+
+    [leftHemisphereRef.current, rightHemisphereRef.current].forEach((mesh) => {
+      if (!mesh) return;
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      material.color.copy(BASE_BRAIN_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, activity * 0.28);
+      material.emissive.copy(ACTIVITY_COLOR);
+      material.emissiveIntensity = 0.18 + activity * 1.8;
+    });
+
+    if (cerebellumRef.current) {
+      const material = cerebellumRef.current.material as THREE.MeshStandardMaterial;
+      material.color.copy(BASE_CEREBELLUM_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, activity * 0.2);
+      material.emissive.copy(ACTIVITY_COLOR);
+      material.emissiveIntensity = 0.08 + activity * 1.1;
+    }
+  });
+
   if (mode === "brain") {
     return (
       <group>
-        {/* Brain-ish mesh: two hemisphere spheres squished */}
-        <mesh position={[-0.18, 0, 0]} scale={[0.85, 0.8, 1]}>
-          <sphereGeometry args={[0.85, 48, 48]} />
-          <meshStandardMaterial color="hsl(340, 40%, 68%)" roughness={0.85} metalness={0.05} />
+        <mesh ref={glowRef} scale={1.02}>
+          <sphereGeometry args={[1.06, 48, 48]} />
+          <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.08} depthWrite={false} />
         </mesh>
-        <mesh position={[0.18, 0, 0]} scale={[0.85, 0.8, 1]}>
+        <mesh ref={leftHemisphereRef} position={[-0.18, 0, 0]} scale={[0.85, 0.8, 1]}>
           <sphereGeometry args={[0.85, 48, 48]} />
-          <meshStandardMaterial color="hsl(340, 40%, 68%)" roughness={0.85} metalness={0.05} />
+          <meshStandardMaterial color={BASE_BRAIN_COLOR} roughness={0.85} metalness={0.05} />
         </mesh>
-        {/* Cerebellum */}
-        <mesh position={[0, -0.55, -0.55]} scale={[0.6, 0.4, 0.4]}>
+        <mesh ref={rightHemisphereRef} position={[0.18, 0, 0]} scale={[0.85, 0.8, 1]}>
+          <sphereGeometry args={[0.85, 48, 48]} />
+          <meshStandardMaterial color={BASE_BRAIN_COLOR} roughness={0.85} metalness={0.05} />
+        </mesh>
+        <mesh ref={cerebellumRef} position={[0, -0.55, -0.55]} scale={[0.6, 0.4, 0.4]}>
           <sphereGeometry args={[0.7, 32, 32]} />
-          <meshStandardMaterial color="hsl(340, 35%, 58%)" roughness={0.85} />
+          <meshStandardMaterial color={BASE_CEREBELLUM_COLOR} roughness={0.85} />
         </mesh>
       </group>
     );
   }
-  // Headset / scalp: translucent sphere with a subtle wireframe
+
   return (
     <group>
-      <mesh>
+      <mesh ref={glowRef} scale={1.03}>
+        <sphereGeometry args={[1.02, 40, 40]} />
+        <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.08} depthWrite={false} />
+      </mesh>
+      <mesh ref={shellRef}>
         <sphereGeometry args={[0.96, 48, 48]} />
         <meshStandardMaterial
-          color="hsl(210, 70%, 35%)"
+          ref={shellMaterialRef}
+          color={BASE_HEAD_COLOR}
           transparent
           opacity={0.25}
           roughness={0.3}
@@ -53,12 +118,11 @@ function HeadMesh({ mode }: { mode: "headset" | "brain" }) {
       </mesh>
       <mesh>
         <sphereGeometry args={[0.965, 24, 24]} />
-        <meshBasicMaterial color="hsl(195, 100%, 78%)" wireframe transparent opacity={0.18} />
+        <meshBasicMaterial ref={shellWireRef} color={ACTIVITY_COLOR} wireframe transparent opacity={0.18} />
       </mesh>
-      {/* Nose indicator */}
       <mesh position={[0, 0.25, 0.95]} rotation={[Math.PI / 2, 0, 0]}>
         <coneGeometry args={[0.05, 0.15, 16]} />
-        <meshStandardMaterial color="hsl(195, 100%, 78%)" />
+        <meshStandardMaterial color={ACTIVITY_COLOR} emissive={ACTIVITY_COLOR} emissiveIntensity={0.8} />
       </mesh>
     </group>
   );
@@ -73,26 +137,60 @@ function Electrode({
   label: string;
   amplitude: number;
 }) {
-  const ref = useRef<THREE.Mesh>(null);
+  const coreRef = useRef<THREE.Mesh>(null);
+  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
   const lightRef = useRef<THREE.PointLight>(null);
+  const haloRef = useRef<THREE.Mesh>(null);
+  const beamRef = useRef<THREE.Mesh>(null);
+  const smoothedAmplitude = useRef(amplitude);
 
-  useFrame(() => {
-    if (!ref.current) return;
-    const s = 0.04 + Math.min(1, amplitude) * 0.06;
-    ref.current.scale.setScalar(s / 0.05); // base radius 0.05
-    const mat = ref.current.material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity = 0.3 + Math.min(1, amplitude) * 2.2;
-    if (lightRef.current) lightRef.current.intensity = Math.min(1.2, amplitude * 1.2);
+  useFrame((_state, delta) => {
+    smoothedAmplitude.current = THREE.MathUtils.damp(smoothedAmplitude.current, amplitude, 10, delta);
+    const activity = THREE.MathUtils.smoothstep(smoothedAmplitude.current, 0.02, 1);
+    const pulse = 0.6 + Math.sin(performance.now() * 0.01 + position[0] * 8 + position[1] * 6) * 0.4;
+    const glow = activity * (0.75 + pulse * 0.25);
+    const scale = 0.04 + glow * 0.1;
+
+    if (coreRef.current) {
+      coreRef.current.scale.setScalar(scale / 0.05);
+    }
+    if (materialRef.current) {
+      materialRef.current.color.copy(ACTIVITY_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, glow * 0.45);
+      materialRef.current.emissive.copy(ACTIVITY_COLOR);
+      materialRef.current.emissiveIntensity = 0.45 + glow * 4.8;
+      materialRef.current.roughness = 0.18 + (1 - glow) * 0.25;
+      materialRef.current.metalness = 0.25 + glow * 0.35;
+    }
+    if (lightRef.current) {
+      lightRef.current.intensity = 0.5 + glow * 3.4;
+      lightRef.current.distance = 0.7 + glow * 1.1;
+    }
+    if (haloRef.current) {
+      haloRef.current.scale.setScalar(1 + glow * 2.6);
+      const haloMaterial = haloRef.current.material as THREE.MeshBasicMaterial;
+      haloMaterial.opacity = 0.08 + glow * 0.2;
+    }
+    if (beamRef.current) {
+      beamRef.current.scale.set(1 + glow * 0.8, 0.75 + glow * 1.6, 1 + glow * 0.8);
+      const beamMaterial = beamRef.current.material as THREE.MeshBasicMaterial;
+      beamMaterial.opacity = 0.06 + glow * 0.18;
+    }
   });
-
-  const color = new THREE.Color().setHSL(0.55 - Math.min(1, amplitude) * 0.15, 1, 0.65);
 
   return (
     <group position={position}>
-      <Sphere ref={ref} args={[0.05, 24, 24]}>
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.6} />
+      <mesh ref={haloRef}>
+        <sphereGeometry args={[0.08, 18, 18]} />
+        <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.12} depthWrite={false} />
+      </mesh>
+      <mesh ref={beamRef} position={[0, position[1] >= 0 ? 0.18 : -0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.025, 0.08, 0.32, 24, 1, true]} />
+        <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.1} depthWrite={false} />
+      </mesh>
+      <Sphere ref={coreRef} args={[0.05, 24, 24]}>
+        <meshStandardMaterial ref={materialRef} color={ACTIVITY_COLOR} emissive={ACTIVITY_COLOR} emissiveIntensity={1} />
       </Sphere>
-      <pointLight ref={lightRef} color={color} distance={0.6} intensity={0.4} />
+      <pointLight ref={lightRef} color={ACTIVITY_COLOR} distance={1} intensity={0.8} />
       <Html
         center
         distanceFactor={6}
@@ -121,14 +219,25 @@ function Scene({
   amplitudes: number[];
   mode: "headset" | "brain";
 }) {
+  const globalActivity = amplitudes.length
+    ? amplitudes.reduce((sum, value) => sum + value, 0) / amplitudes.length
+    : 0;
+
   return (
     <>
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[2, 3, 2]} intensity={0.8} />
-      <directionalLight position={[-2, -1, -1]} intensity={0.25} color="hsl(220, 100%, 78%)" />
-      <HeadMesh mode={mode} />
-      {electrodes.map((e, i) => (
-        <Electrode key={e.label + i} position={e.position} label={e.label} amplitude={amplitudes[i] ?? 0} />
+      <fog attach="fog" args={["#040816", 2.8, 6]} />
+      <ambientLight intensity={0.35 + globalActivity * 0.25} />
+      <pointLight position={[0, 1.4, 1.9]} intensity={1 + globalActivity * 1.6} color={ACTIVITY_COLOR} />
+      <directionalLight position={[2, 3, 2]} intensity={0.8 + globalActivity * 0.7} />
+      <directionalLight position={[-2, -1, -1]} intensity={0.25 + globalActivity * 0.35} color="hsl(220, 100%, 78%)" />
+      <ReactiveHeadMesh mode={mode} globalActivity={globalActivity} />
+      {electrodes.map((electrode, index) => (
+        <Electrode
+          key={`${electrode.label}-${index}`}
+          position={electrode.position}
+          label={electrode.label}
+          amplitude={amplitudes[index] ?? 0}
+        />
       ))}
       <OrbitControls enablePan={false} minDistance={2} maxDistance={5} />
     </>
@@ -137,30 +246,70 @@ function Scene({
 
 export function Brain3D({ recording, currentTime, mode }: Props) {
   const electrodes = useMemo<ElectrodeData[]>(() => {
-    const out: ElectrodeData[] = [];
-    recording.channels.forEach((ch, idx) => {
-      const pos = resolveElectrodePosition(ch.label);
-      if (pos) out.push({ label: ch.label, position: pos, channelIdx: idx });
+    const output: ElectrodeData[] = [];
+    recording.channels.forEach((channel, index) => {
+      const position = resolveElectrodePosition(channel.label);
+      if (position) output.push({ label: channel.label, position, channelIdx: index });
     });
-    return out;
+    return output;
   }, [recording]);
 
-  // Amplitude per electrode at the current time — average abs over a small window.
-  const amplitudes = useMemo(() => {
-    const win = Math.floor(recording.sampleRate * 0.25); // 250ms window
-    const center = Math.floor(currentTime * recording.sampleRate);
-    return electrodes.map((e) => {
-      const ch = recording.channels[e.channelIdx];
-      const range = Math.max(1, Math.abs(ch.max - ch.min));
-      let sum = 0;
-      let n = 0;
-      const from = Math.max(0, center - win);
-      const to = Math.min(ch.data.length, center + win);
-      for (let i = from; i < to; i++) { sum += Math.abs(ch.data[i]); n++; }
-      const avg = n ? sum / n : 0;
-      return Math.min(1, (avg / (range * 0.5)) * 1.2);
+  const channelStats = useMemo(() => {
+    return recording.channels.map((channel) => {
+      let peakAbs = 1;
+      let totalAbs = 0;
+
+      for (let i = 0; i < channel.data.length; i++) {
+        const value = Math.abs(channel.data[i]);
+        if (value > peakAbs) peakAbs = value;
+        totalAbs += value;
+      }
+
+      return {
+        peakAbs,
+        meanAbs: totalAbs / Math.max(1, channel.data.length),
+      };
     });
-  }, [electrodes, recording, currentTime]);
+  }, [recording]);
+
+  const amplitudes = useMemo(() => {
+    const center = Math.floor(currentTime * recording.sampleRate);
+    const energyWindow = Math.max(2, Math.floor(recording.sampleRate * 0.05));
+    const neighborhoodWindow = Math.max(3, Math.floor(recording.sampleRate * 0.12));
+
+    return electrodes.map((electrode) => {
+      const channel = recording.channels[electrode.channelIdx];
+      const stats = channelStats[electrode.channelIdx];
+      const from = Math.max(0, center - neighborhoodWindow);
+      const to = Math.min(channel.data.length, center + neighborhoodWindow);
+      const localFrom = Math.max(0, center - energyWindow);
+      const localTo = Math.min(channel.data.length, center + energyWindow);
+
+      let instantaneous = 0;
+      let localPeak = 0;
+      let localAbsSum = 0;
+      let localSamples = 0;
+
+      for (let i = from; i < to; i++) {
+        const value = Math.abs(channel.data[i]);
+        if (i === center) instantaneous = value;
+        if (value > localPeak) localPeak = value;
+
+        if (i >= localFrom && i < localTo) {
+          localAbsSum += value;
+          localSamples += 1;
+        }
+      }
+
+      const localMean = localAbsSum / Math.max(1, localSamples);
+      const instantRatio = instantaneous / stats.peakAbs;
+      const peakRatio = localPeak / stats.peakAbs;
+      const meanRatio = localMean / Math.max(stats.meanAbs, 1);
+      const energy = instantRatio * 0.65 + peakRatio * 0.25 + Math.min(1.5, meanRatio) * 0.2;
+
+      return THREE.MathUtils.clamp(energy * 1.35, 0, 1);
+    });
+  }, [channelStats, currentTime, electrodes, recording]);
 
   return (
     <Canvas camera={{ position: [0, 0.4, 3], fov: 45 }} dpr={[1, 2]}>
