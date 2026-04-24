@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Activity, Brain, Waves, Download, ArrowLeftRight } from "lucide-react";
 import { SourcePanel } from "@/components/eeg/SourcePanel";
 import { WaveformCanvas } from "@/components/eeg/WaveformCanvas";
 import { Brain3D } from "@/components/eeg/Brain3D";
 import { PlaybackControls } from "@/components/eeg/PlaybackControls";
+import { computeChannelActivities, summarizeActivity } from "@/lib/eeg/activity";
 import { useEEGPlayback } from "@/lib/eeg/usePlayback";
 import { DEMO_SAMPLES, generateDemo } from "@/lib/eeg/demo";
 import type { EEGRecording } from "@/lib/eeg/types";
@@ -21,6 +22,10 @@ const Index = () => {
 
   const duration = recording?.duration ?? 0;
   const { currentTime, isPlaying, speed, setSpeed, toggle, seek, reset } = useEEGPlayback(duration);
+  const activitySummary = useMemo(() => {
+    if (!recording) return null;
+    return summarizeActivity(computeChannelActivities(recording, currentTime));
+  }, [recording, currentTime]);
 
   const handleLoaded = (rec: EEGRecording) => {
     setError(null);
@@ -216,6 +221,8 @@ const Index = () => {
             )}
           </div>
 
+          {activitySummary && <LiveActivityInspector summary={activitySummary} />}
+
           {recording && (
             <div className="glass-panel p-6 space-y-3">
               <p className="eyebrow">Channels</p>
@@ -234,6 +241,63 @@ const Index = () => {
   );
 };
 
+function LiveActivityInspector({
+  summary,
+}: {
+  summary: ReturnType<typeof summarizeActivity>;
+}) {
+  const dominant = summary.topChannels[0];
+
+  return (
+    <div className="glass-panel p-6 space-y-4">
+      <div>
+        <p className="eyebrow">Live activity</p>
+        <h3 className="font-display text-xl mt-1">Signal-to-brain driver</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          These values use the same activity model that powers the 3D electrode glow.
+        </p>
+      </div>
+
+      <div className="metric-block !p-4">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <span className="text-[0.72rem] uppercase tracking-[0.14em] text-muted-foreground">Global glow</span>
+            <strong className="block mt-1.5 text-2xl">{Math.round(summary.globalActivity * 100)}%</strong>
+          </div>
+          {dominant && (
+            <span className="status-chip ready !normal-case !tracking-normal">
+              Peak: {cleanLabel(dominant.label)} {Math.round(dominant.activity * 100)}%
+            </span>
+          )}
+        </div>
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+          <div
+            className="activity-meter-fill"
+            style={{ width: `${Math.round(summary.globalActivity * 100)}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {summary.topChannels.map((channel) => (
+          <div key={channel.channelIdx} className="activity-row">
+            <span className="w-12 text-xs font-bold text-foreground">{cleanLabel(channel.label)}</span>
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="activity-channel-fill"
+                style={{ width: `${Math.round(channel.activity * 100)}%` }}
+              />
+            </div>
+            <span className="w-10 text-right text-xs font-mono text-muted-foreground">
+              {Math.round(channel.activity * 100)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -241,6 +305,10 @@ function Detail({ label, value }: { label: string; value: string }) {
       <dd className="mt-1 text-sm text-foreground break-words">{value}</dd>
     </div>
   );
+}
+
+function cleanLabel(label: string) {
+  return label.replace(/-REF|EEG /gi, "").slice(0, 6);
 }
 
 export default Index;

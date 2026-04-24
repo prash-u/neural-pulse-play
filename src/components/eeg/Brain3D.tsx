@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Html, OrbitControls, Sphere } from "@react-three/drei";
 import * as THREE from "three";
+import { computeChannelActivities } from "@/lib/eeg/activity";
 import type { EEGRecording } from "@/lib/eeg/types";
 import { resolveElectrodePosition } from "@/lib/eeg/montage";
 
@@ -254,62 +255,10 @@ export function Brain3D({ recording, currentTime, mode }: Props) {
     return output;
   }, [recording]);
 
-  const channelStats = useMemo(() => {
-    return recording.channels.map((channel) => {
-      let peakAbs = 1;
-      let totalAbs = 0;
-
-      for (let i = 0; i < channel.data.length; i++) {
-        const value = Math.abs(channel.data[i]);
-        if (value > peakAbs) peakAbs = value;
-        totalAbs += value;
-      }
-
-      return {
-        peakAbs,
-        meanAbs: totalAbs / Math.max(1, channel.data.length),
-      };
-    });
-  }, [recording]);
-
   const amplitudes = useMemo(() => {
-    const center = Math.floor(currentTime * recording.sampleRate);
-    const energyWindow = Math.max(2, Math.floor(recording.sampleRate * 0.05));
-    const neighborhoodWindow = Math.max(3, Math.floor(recording.sampleRate * 0.12));
-
-    return electrodes.map((electrode) => {
-      const channel = recording.channels[electrode.channelIdx];
-      const stats = channelStats[electrode.channelIdx];
-      const from = Math.max(0, center - neighborhoodWindow);
-      const to = Math.min(channel.data.length, center + neighborhoodWindow);
-      const localFrom = Math.max(0, center - energyWindow);
-      const localTo = Math.min(channel.data.length, center + energyWindow);
-
-      let instantaneous = 0;
-      let localPeak = 0;
-      let localAbsSum = 0;
-      let localSamples = 0;
-
-      for (let i = from; i < to; i++) {
-        const value = Math.abs(channel.data[i]);
-        if (i === center) instantaneous = value;
-        if (value > localPeak) localPeak = value;
-
-        if (i >= localFrom && i < localTo) {
-          localAbsSum += value;
-          localSamples += 1;
-        }
-      }
-
-      const localMean = localAbsSum / Math.max(1, localSamples);
-      const instantRatio = instantaneous / stats.peakAbs;
-      const peakRatio = localPeak / stats.peakAbs;
-      const meanRatio = localMean / Math.max(stats.meanAbs, 1);
-      const energy = instantRatio * 0.65 + peakRatio * 0.25 + Math.min(1.5, meanRatio) * 0.2;
-
-      return THREE.MathUtils.clamp(energy * 1.35, 0, 1);
-    });
-  }, [channelStats, currentTime, electrodes, recording]);
+    const byChannel = computeChannelActivities(recording, currentTime);
+    return electrodes.map((electrode) => byChannel[electrode.channelIdx]?.activity ?? 0);
+  }, [currentTime, electrodes, recording]);
 
   return (
     <Canvas camera={{ position: [0, 0.4, 3], fov: 45 }} dpr={[1, 2]}>
