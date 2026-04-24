@@ -32,10 +32,14 @@ function ReactiveHeadMesh({
   mode,
   globalActivity,
   heatSpread,
+  electrodes,
+  amplitudes,
 }: {
   mode: "headset" | "brain";
   globalActivity: number;
   heatSpread: number;
+  electrodes: ElectrodeData[];
+  amplitudes: number[];
 }) {
   const shellRef = useRef<THREE.Mesh>(null);
   const shellMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
@@ -48,6 +52,9 @@ function ReactiveHeadMesh({
   const leftGeometry = useMemo(() => createCortexGeometry("left"), []);
   const rightGeometry = useMemo(() => createCortexGeometry("right"), []);
   const cerebellumGeometry = useMemo(() => createCerebellumGeometry(), []);
+  const leftPositions = useMemo(() => extractVertexPositions(leftGeometry), [leftGeometry]);
+  const rightPositions = useMemo(() => extractVertexPositions(rightGeometry), [rightGeometry]);
+  const cerebellumPositions = useMemo(() => extractVertexPositions(cerebellumGeometry), [cerebellumGeometry]);
 
   useFrame((_state, delta) => {
     smoothedActivity.current = THREE.MathUtils.damp(smoothedActivity.current, globalActivity, 7, delta);
@@ -84,6 +91,39 @@ function ReactiveHeadMesh({
       material.emissive.copy(ACTIVITY_COLOR);
       material.emissiveIntensity = 0.08 + activity * 1.1;
     }
+
+    if (mode === "brain") {
+      applySurfaceHeat(
+        leftGeometry,
+        leftPositions,
+        [-0.11, 0, 0],
+        [0.86, 0.83, 1.02],
+        BASE_BRAIN_COLOR,
+        electrodes,
+        amplitudes,
+        heatSpread,
+      );
+      applySurfaceHeat(
+        rightGeometry,
+        rightPositions,
+        [0.11, 0, 0],
+        [0.86, 0.83, 1.02],
+        BASE_BRAIN_COLOR,
+        electrodes,
+        amplitudes,
+        heatSpread,
+      );
+      applySurfaceHeat(
+        cerebellumGeometry,
+        cerebellumPositions,
+        [0, -0.52, -0.56],
+        [0.6, 0.4, 0.44],
+        BASE_CEREBELLUM_COLOR,
+        electrodes,
+        amplitudes,
+        heatSpread * 0.8,
+      );
+    }
   });
 
   if (mode === "brain") {
@@ -94,13 +134,13 @@ function ReactiveHeadMesh({
           <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.08} depthWrite={false} />
         </mesh>
         <mesh ref={leftHemisphereRef} geometry={leftGeometry} position={[-0.11, 0, 0]} scale={[0.86, 0.83, 1.02]}>
-          <meshPhysicalMaterial color={BASE_BRAIN_COLOR} roughness={0.78} metalness={0.05} clearcoat={0.18} clearcoatRoughness={0.72} />
+          <meshPhysicalMaterial color={BASE_BRAIN_COLOR} roughness={0.78} metalness={0.05} clearcoat={0.18} clearcoatRoughness={0.72} vertexColors />
         </mesh>
         <mesh ref={rightHemisphereRef} geometry={rightGeometry} position={[0.11, 0, 0]} scale={[0.86, 0.83, 1.02]}>
-          <meshPhysicalMaterial color={BASE_BRAIN_COLOR} roughness={0.78} metalness={0.05} clearcoat={0.18} clearcoatRoughness={0.72} />
+          <meshPhysicalMaterial color={BASE_BRAIN_COLOR} roughness={0.78} metalness={0.05} clearcoat={0.18} clearcoatRoughness={0.72} vertexColors />
         </mesh>
         <mesh ref={cerebellumRef} geometry={cerebellumGeometry} position={[0, -0.52, -0.56]} scale={[0.6, 0.4, 0.44]}>
-          <meshPhysicalMaterial color={BASE_CEREBELLUM_COLOR} roughness={0.84} metalness={0.03} clearcoat={0.1} clearcoatRoughness={0.8} />
+          <meshPhysicalMaterial color={BASE_CEREBELLUM_COLOR} roughness={0.84} metalness={0.03} clearcoat={0.1} clearcoatRoughness={0.8} vertexColors />
         </mesh>
         <mesh position={[0, 0.02, 0]} scale={[0.98 + heatSpread * 0.03, 0.94 + heatSpread * 0.02, 1.02]}>
           <sphereGeometry args={[0.96, 42, 42]} />
@@ -252,6 +292,7 @@ function HeatField({
   heatSpread: number;
   surfaceInset: number;
 }) {
+  if (mode === "brain") return null;
   return (
     <group>
       {electrodes.map((electrode, index) => {
@@ -347,7 +388,13 @@ function Scene({
       <pointLight position={[0, 1.4, 1.9]} intensity={1 + globalActivity * 1.6} color={ACTIVITY_COLOR} />
       <directionalLight position={[2, 3, 2]} intensity={0.8 + globalActivity * 0.7} />
       <directionalLight position={[-2, -1, -1]} intensity={0.25 + globalActivity * 0.35} color="hsl(220, 100%, 78%)" />
-      <ReactiveHeadMesh mode={mode} globalActivity={globalActivity} heatSpread={heatSpread} />
+      <ReactiveHeadMesh
+        mode={mode}
+        globalActivity={globalActivity}
+        heatSpread={heatSpread}
+        electrodes={electrodes}
+        amplitudes={amplitudes}
+      />
       <HeatField electrodes={electrodes} amplitudes={amplitudes} mode={mode} heatSpread={heatSpread} surfaceInset={surfaceInset} />
       {electrodes.map((electrode, index) => (
         <Electrode
@@ -460,6 +507,62 @@ function createCerebellumGeometry() {
 function sinkPosition(position: [number, number, number], inset: number): [number, number, number] {
   const factor = 1 - inset;
   return [position[0] * factor, position[1] * factor, position[2] * factor];
+}
+
+function extractVertexPositions(geometry: THREE.BufferGeometry) {
+  const attribute = geometry.attributes.position;
+  const points: [number, number, number][] = [];
+  for (let i = 0; i < attribute.count; i++) {
+    points.push([attribute.getX(i), attribute.getY(i), attribute.getZ(i)]);
+  }
+  ensureColorAttribute(geometry, attribute.count);
+  return points;
+}
+
+function ensureColorAttribute(geometry: THREE.BufferGeometry, count: number) {
+  if (!geometry.getAttribute("color")) {
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(count * 3, 3));
+  }
+}
+
+function applySurfaceHeat(
+  geometry: THREE.BufferGeometry,
+  vertices: [number, number, number][],
+  offset: [number, number, number],
+  scale: [number, number, number],
+  baseColor: THREE.Color,
+  electrodes: ElectrodeData[],
+  amplitudes: number[],
+  heatSpread: number,
+) {
+  const colorAttribute = geometry.getAttribute("color") as THREE.BufferAttribute;
+  const world = new THREE.Vector3();
+  const mixedColor = new THREE.Color();
+  const electrodePosition = new THREE.Vector3();
+
+  for (let i = 0; i < vertices.length; i++) {
+    const [x, y, z] = vertices[i];
+    world.set(x * scale[0] + offset[0], y * scale[1] + offset[1], z * scale[2] + offset[2]);
+
+    let heat = 0;
+    let totalWeight = 0;
+    for (let j = 0; j < electrodes.length; j++) {
+      const electrode = electrodes[j];
+      const amplitude = amplitudes[j] ?? 0;
+      if (amplitude <= 0) continue;
+      electrodePosition.set(...electrode.position);
+      const distance = world.distanceTo(electrodePosition);
+      const influence = Math.exp(-(distance * distance) / (0.055 * heatSpread));
+      heat += amplitude * influence;
+      totalWeight += influence;
+    }
+
+    const normalizedHeat = totalWeight > 0 ? THREE.MathUtils.clamp(heat / totalWeight, 0, 1) : 0;
+    mixedColor.copy(baseColor).lerp(getHeatColor(normalizedHeat), normalizedHeat * 0.92);
+    colorAttribute.setXYZ(i, mixedColor.r, mixedColor.g, mixedColor.b);
+  }
+
+  colorAttribute.needsUpdate = true;
 }
 
 function getHeatColor(activity: number) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { EEGChannelQuality } from "@/lib/eeg/review";
 import type { EEGRecording } from "@/lib/eeg/types";
 
 interface Props {
@@ -7,12 +8,13 @@ interface Props {
   /** Window length in seconds */
   window?: number;
   className?: string;
+  quality?: EEGChannelQuality[];
 }
 
 /**
  * Stacked scrolling EEG waveform canvas. Each channel rendered as its own lane.
  */
-export function WaveformCanvas({ recording, currentTime, window = 10, className }: Props) {
+export function WaveformCanvas({ recording, currentTime, window = 10, className, quality = [] }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -34,6 +36,7 @@ export function WaveformCanvas({ recording, currentTime, window = 10, className 
     ctx.fillRect(0, 0, W, H);
 
     const channels = recording.channels;
+    const qualityByLabel = new Map(quality.map((channel) => [channel.label, channel]));
     const laneHeight = H / channels.length;
     const labelWidth = 64;
     const plotLeft = labelWidth;
@@ -66,7 +69,8 @@ export function WaveformCanvas({ recording, currentTime, window = 10, className 
       ctx.stroke();
 
       // label
-      ctx.fillStyle = "hsl(213 45% 97% / 0.85)";
+      const channelQuality = qualityByLabel.get(ch.label);
+      ctx.fillStyle = channelQuality?.artifact ? "hsl(42 95% 70%)" : "hsl(213 45% 97% / 0.85)";
       ctx.font = "600 11px 'SF Pro Display', system-ui, sans-serif";
       ctx.textBaseline = "middle";
       ctx.fillText(ch.label.replace(/-REF|EEG /gi, "").slice(0, 8), 8, centerY);
@@ -80,7 +84,9 @@ export function WaveformCanvas({ recording, currentTime, window = 10, className 
       if (samples <= 1) return;
       const step = Math.max(1, Math.floor(samples / plotWidth));
 
-      ctx.strokeStyle = idx % 2 === 0 ? "hsl(195 100% 78%)" : "hsl(220 100% 78%)";
+      ctx.strokeStyle = channelQuality?.artifact
+        ? "hsl(42 95% 70%)"
+        : idx % 2 === 0 ? "hsl(195 100% 78%)" : "hsl(220 100% 78%)";
       ctx.lineWidth = 1.1;
       ctx.beginPath();
       for (let i = 0; i < samples; i += step) {
@@ -111,7 +117,7 @@ export function WaveformCanvas({ recording, currentTime, window = 10, className 
     ctx.font = "700 11px 'SF Pro Display', system-ui, sans-serif";
     ctx.textBaseline = "top";
     ctx.fillText(`${currentTime.toFixed(2)}s`, playheadX + 6, 4);
-  }, [recording, currentTime, window]);
+  }, [recording, currentTime, quality, window]);
 
   return <canvas ref={canvasRef} className={className} style={{ width: "100%", height: "100%", display: "block" }} />;
 }

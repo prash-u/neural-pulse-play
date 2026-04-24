@@ -35,6 +35,20 @@ export const MONTAGE_10_20: Record<string, Vec3> = {
 };
 
 export function resolveElectrodePosition(label: string): Vec3 | null {
+  if (label.includes("-")) {
+    const [left, right] = label.split("-").map((part) => part.trim()).filter(Boolean);
+    if (left && right) {
+      const leftPos = resolveElectrodePosition(left);
+      const rightPos = resolveElectrodePosition(right);
+      if (leftPos && rightPos) {
+        return [
+          (leftPos[0] + rightPos[0]) / 2,
+          (leftPos[1] + rightPos[1]) / 2,
+          (leftPos[2] + rightPos[2]) / 2,
+        ];
+      }
+    }
+  }
   const key = label.trim().toUpperCase().replace(/\s+/g, "").replace(/[^A-Z0-9]/g, "");
   if (MONTAGE_10_20[key]) return MONTAGE_10_20[key];
   // Try stripping suffixes like "-REF"
