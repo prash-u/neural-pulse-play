@@ -14,6 +14,9 @@ const Index = () => {
   const [error, setError] = useState<string | null>(null);
   const [view3D, setView3D] = useState<"headset" | "brain">("headset");
   const [windowSec, setWindowSec] = useState(10);
+  const [signalGain, setSignalGain] = useState(1.15);
+  const [heatSpread, setHeatSpread] = useState(1);
+  const [surfaceInset, setSurfaceInset] = useState(0.14);
 
   // Auto-load a demo on first mount so the app never feels empty.
   useEffect(() => {
@@ -183,7 +186,15 @@ const Index = () => {
             <div className="rounded-[1.75rem] overflow-hidden border"
                  style={{ borderColor: "hsl(215 30% 70% / 0.14)", background: "#040816", height: "clamp(360px, 48vh, 560px)" }}>
               {recording ? (
-                <Brain3D recording={recording} currentTime={currentTime} isPlaying={isPlaying} mode={view3D} />
+                <Brain3D
+                  recording={recording}
+                  currentTime={currentTime}
+                  isPlaying={isPlaying}
+                  mode={view3D}
+                  signalGain={signalGain}
+                  heatSpread={heatSpread}
+                  surfaceInset={surfaceInset}
+                />
               ) : (
                 <div className="grid h-full place-items-center text-muted-foreground">
                   <Brain className="h-6 w-6 text-primary" />
@@ -224,6 +235,18 @@ const Index = () => {
           {activitySummary && <LiveActivityInspector summary={activitySummary} isPlaying={isPlaying} />}
 
           {recording && (
+            <VisualizationControls
+              view3D={view3D}
+              signalGain={signalGain}
+              heatSpread={heatSpread}
+              surfaceInset={surfaceInset}
+              onSignalGainChange={setSignalGain}
+              onHeatSpreadChange={setHeatSpread}
+              onSurfaceInsetChange={setSurfaceInset}
+            />
+          )}
+
+          {recording && (
             <div className="glass-panel p-6 space-y-3">
               <p className="eyebrow">Channels</p>
               <div className="flex flex-wrap gap-1.5">
@@ -240,6 +263,102 @@ const Index = () => {
     </main>
   );
 };
+
+function VisualizationControls({
+  view3D,
+  signalGain,
+  heatSpread,
+  surfaceInset,
+  onSignalGainChange,
+  onHeatSpreadChange,
+  onSurfaceInsetChange,
+}: {
+  view3D: "headset" | "brain";
+  signalGain: number;
+  heatSpread: number;
+  surfaceInset: number;
+  onSignalGainChange: (value: number) => void;
+  onHeatSpreadChange: (value: number) => void;
+  onSurfaceInsetChange: (value: number) => void;
+}) {
+  return (
+    <div className="glass-panel p-6 space-y-4">
+      <div>
+        <p className="eyebrow">Visualization controls</p>
+        <h3 className="font-display text-xl mt-1">Clinical-style tuning</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Adjust response strength, spatial spread, and cortical inset for a tighter topographic presentation.
+        </p>
+      </div>
+
+      <SliderRow
+        label="Signal gain"
+        value={signalGain}
+        min={0.75}
+        max={1.8}
+        step={0.05}
+        display={`${signalGain.toFixed(2)}×`}
+        onChange={onSignalGainChange}
+      />
+
+      <SliderRow
+        label="Map spread"
+        value={heatSpread}
+        min={0.65}
+        max={1.6}
+        step={0.05}
+        display={`${heatSpread.toFixed(2)}×`}
+        onChange={onHeatSpreadChange}
+      />
+
+      <SliderRow
+        label={view3D === "brain" ? "Cortical inset" : "Headset inset"}
+        value={surfaceInset}
+        min={0.04}
+        max={0.24}
+        step={0.01}
+        display={`${Math.round(surfaceInset * 100)}%`}
+        onChange={onSurfaceInsetChange}
+      />
+    </div>
+  );
+}
+
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  step,
+  display,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  display: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="space-y-2 block">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-foreground">{label}</span>
+        <span className="text-xs font-mono text-muted-foreground">{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="viz-slider"
+      />
+    </label>
+  );
+}
 
 function LiveActivityInspector({
   summary,
