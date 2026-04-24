@@ -9,6 +9,7 @@ import { resolveElectrodePosition } from "@/lib/eeg/montage";
 interface Props {
   recording: EEGRecording;
   currentTime: number;
+  isPlaying: boolean;
   mode: "headset" | "brain";
 }
 
@@ -133,10 +134,16 @@ function Electrode({
   position,
   label,
   amplitude,
+  animate,
+  showLabel,
+  mode,
 }: {
   position: [number, number, number];
   label: string;
   amplitude: number;
+  animate: boolean;
+  showLabel: boolean;
+  mode: "headset" | "brain";
 }) {
   const coreRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
@@ -148,9 +155,9 @@ function Electrode({
   useFrame((_state, delta) => {
     smoothedAmplitude.current = THREE.MathUtils.damp(smoothedAmplitude.current, amplitude, 10, delta);
     const activity = THREE.MathUtils.smoothstep(smoothedAmplitude.current, 0.02, 1);
-    const pulse = 0.6 + Math.sin(performance.now() * 0.01 + position[0] * 8 + position[1] * 6) * 0.4;
-    const glow = activity * (0.75 + pulse * 0.25);
-    const scale = 0.04 + glow * 0.1;
+    const glow = animate ? activity : smoothedAmplitude.current;
+    const baseRadius = mode === "brain" ? 0.028 : 0.04;
+    const scale = baseRadius + glow * (mode === "brain" ? 0.045 : 0.08);
 
     if (coreRef.current) {
       coreRef.current.scale.setScalar(scale / 0.05);
@@ -172,7 +179,7 @@ function Electrode({
       haloMaterial.opacity = 0.08 + glow * 0.2;
     }
     if (beamRef.current) {
-      beamRef.current.scale.set(1 + glow * 0.8, 0.75 + glow * 1.6, 1 + glow * 0.8);
+      beamRef.current.scale.set(1 + glow * 0.55, 0.75 + glow * 1.2, 1 + glow * 0.55);
       const beamMaterial = beamRef.current.material as THREE.MeshBasicMaterial;
       beamMaterial.opacity = 0.06 + glow * 0.18;
     }
@@ -192,21 +199,96 @@ function Electrode({
         <meshStandardMaterial ref={materialRef} color={ACTIVITY_COLOR} emissive={ACTIVITY_COLOR} emissiveIntensity={1} />
       </Sphere>
       <pointLight ref={lightRef} color={ACTIVITY_COLOR} distance={1} intensity={0.8} />
-      <Html
-        center
-        distanceFactor={6}
-        style={{
-          pointerEvents: "none",
-          fontSize: "10px",
-          fontWeight: 700,
-          color: "hsl(213, 45%, 97%)",
-          textShadow: "0 0 6px hsl(220 60% 5%)",
-          whiteSpace: "nowrap",
-          transform: "translateY(-18px)",
-        }}
-      >
-        {label}
-      </Html>
+      {showLabel && (
+        <Html
+          center
+          distanceFactor={6}
+          style={{
+            pointerEvents: "none",
+            fontSize: "10px",
+            fontWeight: 700,
+            color: "hsl(213, 45%, 97%)",
+            textShadow: "0 0 6px hsl(220 60% 5%)",
+            whiteSpace: "nowrap",
+            transform: "translateY(-18px)",
+          }}
+        >
+          {label}
+        </Html>
+      )}
+    </group>
+  );
+}
+
+function HeatField({
+  electrodes,
+  amplitudes,
+  mode,
+}: {
+  electrodes: ElectrodeData[];
+  amplitudes: number[];
+  mode: "headset" | "brain";
+}) {
+  return (
+    <group>
+      {electrodes.map((electrode, index) => {
+        const activity = amplitudes[index] ?? 0;
+        return (
+          <HeatBlob
+            key={`heat-${electrode.label}-${index}`}
+            position={electrode.position}
+            activity={activity}
+            mode={mode}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+function HeatBlob({
+  position,
+  activity,
+  mode,
+}: {
+  position: [number, number, number];
+  activity: number;
+  mode: "headset" | "brain";
+}) {
+  const outerRef = useRef<THREE.Mesh>(null);
+  const innerRef = useRef<THREE.Mesh>(null);
+  const smoothedActivity = useRef(activity);
+
+  useFrame((_state, delta) => {
+    smoothedActivity.current = THREE.MathUtils.damp(smoothedActivity.current, activity, 8, delta);
+    const glow = THREE.MathUtils.smoothstep(smoothedActivity.current, 0.01, 1);
+    const radius = mode === "brain" ? 0.26 + glow * 0.42 : 0.18 + glow * 0.22;
+
+    if (outerRef.current) {
+      outerRef.current.scale.setScalar(radius);
+      const material = outerRef.current.material as THREE.MeshBasicMaterial;
+      material.opacity = (mode === "brain" ? 0.03 : 0.045) + glow * (mode === "brain" ? 0.22 : 0.16);
+      material.color.copy(getHeatColor(glow));
+    }
+
+    if (innerRef.current) {
+      innerRef.current.scale.setScalar(radius * (mode === "brain" ? 0.5 : 0.42));
+      const material = innerRef.current.material as THREE.MeshBasicMaterial;
+      material.opacity = 0.02 + glow * 0.18;
+      material.color.copy(getHeatColor(Math.min(1, glow + 0.18)));
+    }
+  });
+
+  return (
+    <group position={position}>
+      <mesh ref={outerRef}>
+        <sphereGeometry args={[1, 18, 18]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+      <mesh ref={innerRef}>
+        <sphereGeometry args={[1, 16, 16]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
     </group>
   );
 }
@@ -215,10 +297,12 @@ function Scene({
   electrodes,
   amplitudes,
   mode,
+  isPlaying,
 }: {
   electrodes: ElectrodeData[];
   amplitudes: number[];
   mode: "headset" | "brain";
+  isPlaying: boolean;
 }) {
   const globalActivity = amplitudes.length
     ? amplitudes.reduce((sum, value) => sum + value, 0) / amplitudes.length
@@ -232,12 +316,16 @@ function Scene({
       <directionalLight position={[2, 3, 2]} intensity={0.8 + globalActivity * 0.7} />
       <directionalLight position={[-2, -1, -1]} intensity={0.25 + globalActivity * 0.35} color="hsl(220, 100%, 78%)" />
       <ReactiveHeadMesh mode={mode} globalActivity={globalActivity} />
+      <HeatField electrodes={electrodes} amplitudes={amplitudes} mode={mode} />
       {electrodes.map((electrode, index) => (
         <Electrode
           key={`${electrode.label}-${index}`}
           position={electrode.position}
           label={electrode.label}
           amplitude={amplitudes[index] ?? 0}
+          animate={isPlaying}
+          showLabel={mode === "headset"}
+          mode={mode}
         />
       ))}
       <OrbitControls enablePan={false} minDistance={2} maxDistance={5} />
@@ -245,7 +333,7 @@ function Scene({
   );
 }
 
-export function Brain3D({ recording, currentTime, mode }: Props) {
+export function Brain3D({ recording, currentTime, isPlaying, mode }: Props) {
   const electrodes = useMemo<ElectrodeData[]>(() => {
     const output: ElectrodeData[] = [];
     recording.channels.forEach((channel, index) => {
@@ -263,7 +351,23 @@ export function Brain3D({ recording, currentTime, mode }: Props) {
   return (
     <Canvas camera={{ position: [0, 0.4, 3], fov: 45 }} dpr={[1, 2]}>
       <color attach="background" args={["#040816"]} />
-      <Scene electrodes={electrodes} amplitudes={amplitudes} mode={mode} />
+      <Scene electrodes={electrodes} amplitudes={amplitudes} mode={mode} isPlaying={isPlaying} />
     </Canvas>
   );
+}
+
+function getHeatColor(activity: number) {
+  const color = new THREE.Color();
+  if (activity < 0.33) {
+    color.setHSL(0.61 - activity * 0.16, 0.95, 0.52 + activity * 0.08);
+    return color;
+  }
+  if (activity < 0.66) {
+    const mid = (activity - 0.33) / 0.33;
+    color.setHSL(0.16 - mid * 0.07, 1, 0.56);
+    return color;
+  }
+  const hot = (activity - 0.66) / 0.34;
+  color.setHSL(0.06 - hot * 0.06, 1, 0.54 + hot * 0.08);
+  return color;
 }

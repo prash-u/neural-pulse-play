@@ -183,7 +183,7 @@ const Index = () => {
             <div className="rounded-[1.75rem] overflow-hidden border"
                  style={{ borderColor: "hsl(215 30% 70% / 0.14)", background: "#040816", height: "clamp(360px, 48vh, 560px)" }}>
               {recording ? (
-                <Brain3D recording={recording} currentTime={currentTime} mode={view3D} />
+                <Brain3D recording={recording} currentTime={currentTime} isPlaying={isPlaying} mode={view3D} />
               ) : (
                 <div className="grid h-full place-items-center text-muted-foreground">
                   <Brain className="h-6 w-6 text-primary" />
@@ -221,7 +221,7 @@ const Index = () => {
             )}
           </div>
 
-          {activitySummary && <LiveActivityInspector summary={activitySummary} />}
+          {activitySummary && <LiveActivityInspector summary={activitySummary} isPlaying={isPlaying} />}
 
           {recording && (
             <div className="glass-panel p-6 space-y-3">
@@ -243,8 +243,10 @@ const Index = () => {
 
 function LiveActivityInspector({
   summary,
+  isPlaying,
 }: {
   summary: ReturnType<typeof summarizeActivity>;
+  isPlaying: boolean;
 }) {
   const dominant = summary.topChannels[0];
 
@@ -256,6 +258,13 @@ function LiveActivityInspector({
         <p className="text-sm text-muted-foreground mt-1">
           These values use the same activity model that powers the 3D electrode glow.
         </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <span className={`status-chip ${isPlaying ? "ready" : "loading"} !normal-case !tracking-normal`}>
+          {isPlaying ? "Live playback" : "Paused frame"}
+        </span>
+        <span className="status-chip !normal-case !tracking-normal">Blue to red = low to high activity</span>
       </div>
 
       <div className="metric-block !p-4">
