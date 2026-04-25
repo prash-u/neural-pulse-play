@@ -107,8 +107,8 @@ const Index = () => {
             DBS + EEG sandbox for review, tuning, and play.
           </h1>
           <p className="mt-4 max-w-2xl text-base text-muted-foreground">
-            Review EEG with band and montage controls, inspect cortical activity as a topographic field,
-            and switch into a basal-ganglia DBS simulation that behaves like a neurostimulation sandbox.
+            Start with user-uploaded EEG or built-in demos, review signals with band and montage controls,
+            inspect cortical activity as a heat-mapped field, and switch into a basal-ganglia DBS simulation.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <button type="button" onClick={() => setWorkspaceMode("review")} className="pill-button pill-button-primary">

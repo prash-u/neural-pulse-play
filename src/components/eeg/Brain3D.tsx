@@ -216,13 +216,15 @@ function Electrode({
     if (materialRef.current) {
       materialRef.current.color.copy(ACTIVITY_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, glow * 0.45);
       materialRef.current.emissive.copy(ACTIVITY_COLOR);
-      materialRef.current.emissiveIntensity = 0.45 + glow * 4.8;
-      materialRef.current.roughness = 0.18 + (1 - glow) * 0.25;
-      materialRef.current.metalness = 0.25 + glow * 0.35;
+      materialRef.current.emissiveIntensity = mode === "brain" ? 0.12 + glow * 0.75 : 0.45 + glow * 4.8;
+      materialRef.current.roughness = mode === "brain" ? 0.42 : 0.18 + (1 - glow) * 0.25;
+      materialRef.current.metalness = mode === "brain" ? 0.08 : 0.25 + glow * 0.35;
+      materialRef.current.opacity = mode === "brain" ? 0.72 : 1;
+      materialRef.current.transparent = mode === "brain";
     }
     if (lightRef.current) {
-      lightRef.current.intensity = 0.5 + glow * 3.4;
-      lightRef.current.distance = 0.7 + glow * 1.1;
+      lightRef.current.intensity = mode === "brain" ? 0.02 + glow * 0.2 : 0.5 + glow * 3.4;
+      lightRef.current.distance = mode === "brain" ? 0.18 + glow * 0.18 : 0.7 + glow * 1.1;
     }
     if (haloRef.current) {
       haloRef.current.scale.setScalar(1 + glow * 2.6);
@@ -395,7 +397,9 @@ function Scene({
         electrodes={electrodes}
         amplitudes={amplitudes}
       />
-      <HeatField electrodes={electrodes} amplitudes={amplitudes} mode={mode} heatSpread={heatSpread} surfaceInset={surfaceInset} />
+      {mode === "headset" && (
+        <HeatField electrodes={electrodes} amplitudes={amplitudes} mode={mode} heatSpread={heatSpread} surfaceInset={surfaceInset} />
+      )}
       {electrodes.map((electrode, index) => (
         <Electrode
           key={`${electrode.label}-${index}`}

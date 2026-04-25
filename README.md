@@ -20,7 +20,9 @@ This project is moving beyond a simple EEG visualiser. The current product direc
 ### EEG Review
 
 - Demo EEG datasets covering alpha, beta, theta, and spike-heavy activity
-- File and URL loading for EDF/BDF, CSV, and TSV inputs
+- Upload-first ingest flow for EEG files
+- Built-in demos for immediate exploration
+- Optional advanced URL loading as a fallback, not the primary path
 - Playback controls with scrubbing and speed control
 - Band modes:
   `full`, `delta`, `theta`, `alpha`, `beta`, `gamma`
@@ -98,11 +100,18 @@ The project is intentionally built around datasets that are common in EEG and BC
 
 Right now the app ships with synthetic demos and basic ingest support. The next step is expanding the import path and demo library with more real-world reviewed data.
 
+Recommended ingest order:
+
+1. Built-in sample datasets
+2. User upload
+3. Optional URL loading for advanced users
+
 ## Recommended roadmap
 
 Near-term priorities:
 
 - richer artifact classification and channel quality scoring
+- stronger upload flow with channel preview and pre-run validation
 - saved review presets and shareable session exports
 - exportable stimulation and network states
 - game modes built on the DBS simulation layer
