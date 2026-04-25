@@ -9,12 +9,20 @@ interface Props {
   window?: number;
   className?: string;
   quality?: EEGChannelQuality[];
+  gain?: number;
 }
 
 /**
  * Stacked scrolling EEG waveform canvas. Each channel rendered as its own lane.
  */
-export function WaveformCanvas({ recording, currentTime, window = 10, className, quality = [] }: Props) {
+export function WaveformCanvas({
+  recording,
+  currentTime,
+  window = 10,
+  className,
+  quality = [],
+  gain = 1,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -77,7 +85,7 @@ export function WaveformCanvas({ recording, currentTime, window = 10, className,
 
       // waveform
       const range = Math.max(1, Math.abs(ch.max - ch.min));
-      const amp = (laneHeight * 0.45);
+      const amp = laneHeight * 0.45 * gain;
       const startIdx = Math.max(0, Math.floor(startSec * recording.sampleRate));
       const endIdx = Math.min(ch.data.length, Math.ceil(endSec * recording.sampleRate));
       const samples = endIdx - startIdx;
@@ -117,7 +125,7 @@ export function WaveformCanvas({ recording, currentTime, window = 10, className,
     ctx.font = "700 11px 'SF Pro Display', system-ui, sans-serif";
     ctx.textBaseline = "top";
     ctx.fillText(`${currentTime.toFixed(2)}s`, playheadX + 6, 4);
-  }, [recording, currentTime, quality, window]);
+  }, [recording, currentTime, gain, quality, window]);
 
   return <canvas ref={canvasRef} className={className} style={{ width: "100%", height: "100%", display: "block" }} />;
 }

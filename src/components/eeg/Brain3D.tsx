@@ -1,586 +1,305 @@
-import { useMemo, useRef } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Html, OrbitControls, Sphere } from "@react-three/drei";
-import * as THREE from "three";
+import { useId, useMemo, useState } from "react";
 import { computeChannelActivities } from "@/lib/eeg/activity";
-import type { EEGRecording } from "@/lib/eeg/types";
+import type { EEGChannelQuality, EEGBandMode } from "@/lib/eeg/review";
 import { resolveElectrodePosition } from "@/lib/eeg/montage";
+import type { EEGRecording } from "@/lib/eeg/types";
 
 interface Props {
   recording: EEGRecording;
   currentTime: number;
   isPlaying: boolean;
-  mode: "headset" | "brain";
+  mode: "headmap" | "cortical";
+  bandMode: EEGBandMode;
   signalGain?: number;
   heatSpread?: number;
   surfaceInset?: number;
+  quality?: EEGChannelQuality[];
+  showLabels?: boolean;
 }
 
-interface ElectrodeData {
+interface ElectrodeVisual {
   label: string;
-  position: [number, number, number];
   channelIdx: number;
+  x: number;
+  y: number;
 }
 
-const ACTIVITY_COLOR = new THREE.Color("hsl(188, 100%, 70%)");
-const SECONDARY_ACTIVITY_COLOR = new THREE.Color("hsl(330, 88%, 72%)");
-const BASE_HEAD_COLOR = new THREE.Color("hsl(210, 70%, 35%)");
-const BASE_BRAIN_COLOR = new THREE.Color("hsl(340, 40%, 68%)");
-const BASE_CEREBELLUM_COLOR = new THREE.Color("hsl(340, 35%, 58%)");
-
-function ReactiveHeadMesh({
-  mode,
-  globalActivity,
-  heatSpread,
-  electrodes,
-  amplitudes,
-}: {
-  mode: "headset" | "brain";
-  globalActivity: number;
-  heatSpread: number;
-  electrodes: ElectrodeData[];
-  amplitudes: number[];
-}) {
-  const shellRef = useRef<THREE.Mesh>(null);
-  const shellMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
-  const shellWireRef = useRef<THREE.MeshBasicMaterial>(null);
-  const leftHemisphereRef = useRef<THREE.Mesh>(null);
-  const rightHemisphereRef = useRef<THREE.Mesh>(null);
-  const cerebellumRef = useRef<THREE.Mesh>(null);
-  const glowRef = useRef<THREE.Mesh>(null);
-  const smoothedActivity = useRef(globalActivity);
-  const leftGeometry = useMemo(() => createCortexGeometry("left"), []);
-  const rightGeometry = useMemo(() => createCortexGeometry("right"), []);
-  const cerebellumGeometry = useMemo(() => createCerebellumGeometry(), []);
-  const leftPositions = useMemo(() => extractVertexPositions(leftGeometry), [leftGeometry]);
-  const rightPositions = useMemo(() => extractVertexPositions(rightGeometry), [rightGeometry]);
-  const cerebellumPositions = useMemo(() => extractVertexPositions(cerebellumGeometry), [cerebellumGeometry]);
-
-  useFrame((_state, delta) => {
-    smoothedActivity.current = THREE.MathUtils.damp(smoothedActivity.current, globalActivity, 7, delta);
-    const activity = smoothedActivity.current;
-
-    if (shellRef.current) {
-      shellRef.current.scale.setScalar(1 + activity * 0.045);
-    }
-    if (glowRef.current) {
-      glowRef.current.scale.setScalar(1 + activity * 0.12);
-    }
-    if (shellMaterialRef.current) {
-      shellMaterialRef.current.opacity = 0.22 + activity * 0.16;
-      shellMaterialRef.current.color.copy(BASE_HEAD_COLOR).lerp(ACTIVITY_COLOR, activity * 0.3);
-      shellMaterialRef.current.emissive.copy(ACTIVITY_COLOR);
-      shellMaterialRef.current.emissiveIntensity = 0.15 + activity * 1.4;
-    }
-    if (shellWireRef.current) {
-      shellWireRef.current.color.copy(ACTIVITY_COLOR);
-      shellWireRef.current.opacity = 0.16 + activity * 0.18;
-    }
-
-    [leftHemisphereRef.current, rightHemisphereRef.current].forEach((mesh) => {
-      if (!mesh) return;
-      const material = mesh.material as THREE.MeshStandardMaterial;
-      material.color.copy(BASE_BRAIN_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, activity * 0.28);
-      material.emissive.copy(ACTIVITY_COLOR);
-      material.emissiveIntensity = 0.18 + activity * 1.8;
-    });
-
-    if (cerebellumRef.current) {
-      const material = cerebellumRef.current.material as THREE.MeshStandardMaterial;
-      material.color.copy(BASE_CEREBELLUM_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, activity * 0.2);
-      material.emissive.copy(ACTIVITY_COLOR);
-      material.emissiveIntensity = 0.08 + activity * 1.1;
-    }
-
-    if (mode === "brain") {
-      applySurfaceHeat(
-        leftGeometry,
-        leftPositions,
-        [-0.11, 0, 0],
-        [0.86, 0.83, 1.02],
-        BASE_BRAIN_COLOR,
-        electrodes,
-        amplitudes,
-        heatSpread,
-      );
-      applySurfaceHeat(
-        rightGeometry,
-        rightPositions,
-        [0.11, 0, 0],
-        [0.86, 0.83, 1.02],
-        BASE_BRAIN_COLOR,
-        electrodes,
-        amplitudes,
-        heatSpread,
-      );
-      applySurfaceHeat(
-        cerebellumGeometry,
-        cerebellumPositions,
-        [0, -0.52, -0.56],
-        [0.6, 0.4, 0.44],
-        BASE_CEREBELLUM_COLOR,
-        electrodes,
-        amplitudes,
-        heatSpread * 0.8,
-      );
-    }
-  });
-
-  if (mode === "brain") {
-    return (
-      <group>
-        <mesh ref={glowRef} scale={1.02}>
-          <sphereGeometry args={[1.06, 48, 48]} />
-          <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.08} depthWrite={false} />
-        </mesh>
-        <mesh ref={leftHemisphereRef} geometry={leftGeometry} position={[-0.11, 0, 0]} scale={[0.86, 0.83, 1.02]}>
-          <meshPhysicalMaterial color={BASE_BRAIN_COLOR} roughness={0.78} metalness={0.05} clearcoat={0.18} clearcoatRoughness={0.72} vertexColors />
-        </mesh>
-        <mesh ref={rightHemisphereRef} geometry={rightGeometry} position={[0.11, 0, 0]} scale={[0.86, 0.83, 1.02]}>
-          <meshPhysicalMaterial color={BASE_BRAIN_COLOR} roughness={0.78} metalness={0.05} clearcoat={0.18} clearcoatRoughness={0.72} vertexColors />
-        </mesh>
-        <mesh ref={cerebellumRef} geometry={cerebellumGeometry} position={[0, -0.52, -0.56]} scale={[0.6, 0.4, 0.44]}>
-          <meshPhysicalMaterial color={BASE_CEREBELLUM_COLOR} roughness={0.84} metalness={0.03} clearcoat={0.1} clearcoatRoughness={0.8} vertexColors />
-        </mesh>
-        <mesh position={[0, 0.02, 0]} scale={[0.98 + heatSpread * 0.03, 0.94 + heatSpread * 0.02, 1.02]}>
-          <sphereGeometry args={[0.96, 42, 42]} />
-          <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.035 + globalActivity * 0.08} depthWrite={false} blending={THREE.AdditiveBlending} />
-        </mesh>
-      </group>
-    );
-  }
-
-  return (
-    <group>
-      <mesh ref={glowRef} scale={1.03}>
-        <sphereGeometry args={[1.02, 40, 40]} />
-        <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.08} depthWrite={false} />
-      </mesh>
-      <mesh ref={shellRef}>
-        <sphereGeometry args={[0.96, 48, 48]} />
-        <meshStandardMaterial
-          ref={shellMaterialRef}
-          color={BASE_HEAD_COLOR}
-          transparent
-          opacity={0.25}
-          roughness={0.3}
-          metalness={0.4}
-        />
-      </mesh>
-      <mesh>
-        <sphereGeometry args={[0.965, 24, 24]} />
-        <meshBasicMaterial ref={shellWireRef} color={ACTIVITY_COLOR} wireframe transparent opacity={0.18} />
-      </mesh>
-      <mesh position={[0, 0.25, 0.95]} rotation={[Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.05, 0.15, 16]} />
-        <meshStandardMaterial color={ACTIVITY_COLOR} emissive={ACTIVITY_COLOR} emissiveIntensity={0.8} />
-      </mesh>
-    </group>
-  );
-}
-
-function Electrode({
-  position,
-  label,
-  amplitude,
-  animate,
-  showLabel,
-  mode,
-  surfaceInset,
-}: {
-  position: [number, number, number];
-  label: string;
-  amplitude: number;
-  animate: boolean;
-  showLabel: boolean;
-  mode: "headset" | "brain";
-  surfaceInset: number;
-}) {
-  const coreRef = useRef<THREE.Mesh>(null);
-  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
-  const lightRef = useRef<THREE.PointLight>(null);
-  const haloRef = useRef<THREE.Mesh>(null);
-  const beamRef = useRef<THREE.Mesh>(null);
-  const smoothedAmplitude = useRef(amplitude);
-
-  useFrame((_state, delta) => {
-    smoothedAmplitude.current = THREE.MathUtils.damp(smoothedAmplitude.current, amplitude, 10, delta);
-    const activity = THREE.MathUtils.smoothstep(smoothedAmplitude.current, 0.02, 1);
-    const glow = animate ? activity : smoothedAmplitude.current;
-    const baseRadius = mode === "brain" ? 0.018 : 0.04;
-    const scale = baseRadius + glow * (mode === "brain" ? 0.022 : 0.08);
-
-    if (coreRef.current) {
-      coreRef.current.scale.setScalar(scale / 0.05);
-    }
-    if (materialRef.current) {
-      materialRef.current.color.copy(ACTIVITY_COLOR).lerp(SECONDARY_ACTIVITY_COLOR, glow * 0.45);
-      materialRef.current.emissive.copy(ACTIVITY_COLOR);
-      materialRef.current.emissiveIntensity = mode === "brain" ? 0.12 + glow * 0.75 : 0.45 + glow * 4.8;
-      materialRef.current.roughness = mode === "brain" ? 0.42 : 0.18 + (1 - glow) * 0.25;
-      materialRef.current.metalness = mode === "brain" ? 0.08 : 0.25 + glow * 0.35;
-      materialRef.current.opacity = mode === "brain" ? 0.72 : 1;
-      materialRef.current.transparent = mode === "brain";
-    }
-    if (lightRef.current) {
-      lightRef.current.intensity = mode === "brain" ? 0.02 + glow * 0.2 : 0.5 + glow * 3.4;
-      lightRef.current.distance = mode === "brain" ? 0.18 + glow * 0.18 : 0.7 + glow * 1.1;
-    }
-    if (haloRef.current) {
-      haloRef.current.scale.setScalar(1 + glow * 2.6);
-      const haloMaterial = haloRef.current.material as THREE.MeshBasicMaterial;
-      haloMaterial.opacity = 0.08 + glow * 0.2;
-    }
-    if (beamRef.current) {
-      beamRef.current.scale.set(1 + glow * 0.55, 0.75 + glow * 1.2, 1 + glow * 0.55);
-      const beamMaterial = beamRef.current.material as THREE.MeshBasicMaterial;
-      beamMaterial.opacity = 0.06 + glow * 0.18;
-    }
-  });
-
-  const anchoredPosition = mode === "brain"
-    ? sinkPosition(position, surfaceInset)
-    : position;
-
-  return (
-    <group position={anchoredPosition}>
-      {mode === "headset" && (
-        <>
-          <mesh ref={haloRef}>
-            <sphereGeometry args={[0.08, 18, 18]} />
-            <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.12} depthWrite={false} />
-          </mesh>
-          <mesh ref={beamRef} position={[0, position[1] >= 0 ? 0.18 : -0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.025, 0.08, 0.32, 24, 1, true]} />
-            <meshBasicMaterial color={ACTIVITY_COLOR} transparent opacity={0.1} depthWrite={false} />
-          </mesh>
-        </>
-      )}
-      <Sphere ref={coreRef} args={[0.05, 24, 24]}>
-        <meshStandardMaterial ref={materialRef} color={ACTIVITY_COLOR} emissive={ACTIVITY_COLOR} emissiveIntensity={1} />
-      </Sphere>
-      <pointLight ref={lightRef} color={ACTIVITY_COLOR} distance={mode === "brain" ? 0.42 : 1} intensity={mode === "brain" ? 0.35 : 0.8} />
-      {showLabel && (
-        <Html
-          center
-          distanceFactor={6}
-          style={{
-            pointerEvents: "none",
-            fontSize: "10px",
-            fontWeight: 700,
-            color: "hsl(213, 45%, 97%)",
-            textShadow: "0 0 6px hsl(220 60% 5%)",
-            whiteSpace: "nowrap",
-            transform: "translateY(-18px)",
-          }}
-        >
-          {label}
-        </Html>
-      )}
-    </group>
-  );
-}
-
-function HeatField({
-  electrodes,
-  amplitudes,
-  mode,
-  heatSpread,
-  surfaceInset,
-}: {
-  electrodes: ElectrodeData[];
-  amplitudes: number[];
-  mode: "headset" | "brain";
-  heatSpread: number;
-  surfaceInset: number;
-}) {
-  if (mode === "brain") return null;
-  return (
-    <group>
-      {electrodes.map((electrode, index) => {
-        const activity = amplitudes[index] ?? 0;
-        return (
-          <HeatBlob
-            key={`heat-${electrode.label}-${index}`}
-            position={mode === "brain" ? sinkPosition(electrode.position, surfaceInset * 0.72) : electrode.position}
-            activity={activity}
-            mode={mode}
-            heatSpread={heatSpread}
-          />
-        );
-      })}
-    </group>
-  );
-}
-
-function HeatBlob({
-  position,
-  activity,
-  mode,
-  heatSpread,
-}: {
-  position: [number, number, number];
-  activity: number;
-  mode: "headset" | "brain";
-  heatSpread: number;
-}) {
-  const outerRef = useRef<THREE.Mesh>(null);
-  const innerRef = useRef<THREE.Mesh>(null);
-  const smoothedActivity = useRef(activity);
-
-  useFrame((_state, delta) => {
-    smoothedActivity.current = THREE.MathUtils.damp(smoothedActivity.current, activity, 8, delta);
-    const glow = THREE.MathUtils.smoothstep(smoothedActivity.current, 0.01, 1);
-    const radius = mode === "brain"
-      ? (0.075 + glow * 0.125) * heatSpread
-      : 0.13 + glow * 0.16;
-
-    if (outerRef.current) {
-      outerRef.current.scale.setScalar(radius);
-      const material = outerRef.current.material as THREE.MeshBasicMaterial;
-      material.opacity = (mode === "brain" ? 0.02 : 0.045) + glow * (mode === "brain" ? 0.14 : 0.16);
-      material.color.copy(getHeatColor(glow));
-    }
-
-    if (innerRef.current) {
-      innerRef.current.scale.setScalar(radius * (mode === "brain" ? 0.5 : 0.42));
-      const material = innerRef.current.material as THREE.MeshBasicMaterial;
-      material.opacity = (mode === "brain" ? 0.015 : 0.02) + glow * (mode === "brain" ? 0.11 : 0.18);
-      material.color.copy(getHeatColor(Math.min(1, glow + 0.18)));
-    }
-  });
-
-  return (
-    <group position={position}>
-      <mesh ref={outerRef}>
-        <sphereGeometry args={[1, 18, 18]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
-      </mesh>
-      <mesh ref={innerRef}>
-        <sphereGeometry args={[1, 16, 16]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
-      </mesh>
-    </group>
-  );
-}
-
-function Scene({
-  electrodes,
-  amplitudes,
-  mode,
-  isPlaying,
-  heatSpread,
-  surfaceInset,
-}: {
-  electrodes: ElectrodeData[];
-  amplitudes: number[];
-  mode: "headset" | "brain";
-  isPlaying: boolean;
-  heatSpread: number;
-  surfaceInset: number;
-}) {
-  const globalActivity = amplitudes.length
-    ? amplitudes.reduce((sum, value) => sum + value, 0) / amplitudes.length
-    : 0;
-
-  return (
-    <>
-      <fog attach="fog" args={["#040816", 2.8, 6]} />
-      <ambientLight intensity={0.35 + globalActivity * 0.25} />
-      <pointLight position={[0, 1.4, 1.9]} intensity={1 + globalActivity * 1.6} color={ACTIVITY_COLOR} />
-      <directionalLight position={[2, 3, 2]} intensity={0.8 + globalActivity * 0.7} />
-      <directionalLight position={[-2, -1, -1]} intensity={0.25 + globalActivity * 0.35} color="hsl(220, 100%, 78%)" />
-      <ReactiveHeadMesh
-        mode={mode}
-        globalActivity={globalActivity}
-        heatSpread={heatSpread}
-        electrodes={electrodes}
-        amplitudes={amplitudes}
-      />
-      {mode === "headset" && (
-        <HeatField electrodes={electrodes} amplitudes={amplitudes} mode={mode} heatSpread={heatSpread} surfaceInset={surfaceInset} />
-      )}
-      {electrodes.map((electrode, index) => (
-        <Electrode
-          key={`${electrode.label}-${index}`}
-          position={electrode.position}
-          label={electrode.label}
-          amplitude={amplitudes[index] ?? 0}
-          animate={isPlaying}
-          showLabel={mode === "headset"}
-          mode={mode}
-          surfaceInset={surfaceInset}
-        />
-      ))}
-      <OrbitControls enablePan={false} minDistance={2} maxDistance={5} />
-    </>
-  );
-}
+const VIEWBOX = { width: 100, height: 120 };
+const HEAD = { cx: 50, cy: 60, rx: 31.5, ry: 39 };
 
 export function Brain3D({
   recording,
   currentTime,
   isPlaying,
   mode,
+  bandMode,
   signalGain = 1.15,
   heatSpread = 1,
   surfaceInset = 0.14,
+  quality = [],
+  showLabels = false,
 }: Props) {
-  const electrodes = useMemo<ElectrodeData[]>(() => {
-    const output: ElectrodeData[] = [];
+  const gradientNamespace = useId();
+  const [hovered, setHovered] = useState<string | null>(null);
+
+  const electrodes = useMemo<ElectrodeVisual[]>(() => {
+    const output: ElectrodeVisual[] = [];
     recording.channels.forEach((channel, index) => {
       const position = resolveElectrodePosition(channel.label);
-      if (position) output.push({ label: channel.label, position, channelIdx: index });
+      if (!position) return;
+      output.push({
+        label: channel.label,
+        channelIdx: index,
+        ...mapToHead(position),
+      });
     });
     return output;
   }, [recording]);
 
-  const amplitudes = useMemo(() => {
-    const byChannel = computeChannelActivities(recording, currentTime);
-    return electrodes.map((electrode) => {
-      const base = byChannel[electrode.channelIdx]?.activity ?? 0;
-      return THREE.MathUtils.clamp(base * signalGain, 0, 1);
-    });
+  const activities = useMemo(() => {
+    const values = computeChannelActivities(recording, currentTime);
+    return electrodes.map((electrode) => ({
+      ...electrode,
+      activity: clamp01((values[electrode.channelIdx]?.activity ?? 0) * signalGain),
+    }));
   }, [currentTime, electrodes, recording, signalGain]);
 
+  const qualityByLabel = useMemo(() => new Map(quality.map((channel) => [channel.label, channel])), [quality]);
+  const palette = getBandPalette(bandMode);
+  const spreadMultiplier = getBandSpreadMultiplier(bandMode);
+  const innerScale = 1 - surfaceInset * 0.32;
+
   return (
-    <Canvas camera={{ position: [0, 0.4, 3], fov: 45 }} dpr={[1, 2]}>
-      <color attach="background" args={["#040816"]} />
-      <Scene
-        electrodes={electrodes}
-        amplitudes={amplitudes}
-        mode={mode}
-        isPlaying={isPlaying}
-        heatSpread={heatSpread}
-        surfaceInset={surfaceInset}
-      />
-    </Canvas>
+    <div className="relative h-full w-full bg-[#040816]">
+      <svg viewBox={`0 0 ${VIEWBOX.width} ${VIEWBOX.height}`} className="h-full w-full" role="img" aria-label="EEG topographic visualizer">
+        <defs>
+          <clipPath id={`${gradientNamespace}-head-clip`}>
+            <ellipse cx={HEAD.cx} cy={HEAD.cy} rx={HEAD.rx} ry={HEAD.ry} />
+          </clipPath>
+          <clipPath id={`${gradientNamespace}-cortex-clip`}>
+            <path d={getCortexClipPath(innerScale)} />
+          </clipPath>
+          {activities.map((electrode) => {
+            const { glowColor, hotColor } = getHeatColors(palette, electrode.activity);
+            const artifact = qualityByLabel.get(electrode.label)?.artifact;
+            const color = artifact ? "hsl(32 95% 60%)" : hotColor;
+            const radius = getBlobRadius(mode, bandMode, electrode.activity, heatSpread * spreadMultiplier);
+            return (
+              <radialGradient key={`${gradientNamespace}-${electrode.label}`} id={`${gradientNamespace}-${electrode.label}`} cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor={color} stopOpacity={Math.min(0.92, 0.24 + electrode.activity * 0.7)} />
+                <stop offset="48%" stopColor={glowColor} stopOpacity={Math.min(0.5, 0.12 + electrode.activity * 0.32)} />
+                <stop offset="100%" stopColor={glowColor} stopOpacity="0" />
+                <animate
+                  attributeName="r"
+                  values={`45%;${45 + (isPlaying ? electrode.activity * 8 : 0)}%;45%`}
+                  dur={bandMode === "gamma" ? "0.45s" : bandMode === "beta" ? "0.9s" : "1.6s"}
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="fy"
+                  values={`50%;${50 - (isPlaying ? electrode.activity * 4 : 0)}%;50%`}
+                  dur={bandMode === "theta" ? "2.4s" : "1.3s"}
+                  repeatCount="indefinite"
+                />
+              </radialGradient>
+            );
+          })}
+          {activities.map((electrode) => {
+            const radius = getBlobRadius(mode, bandMode, electrode.activity, heatSpread * spreadMultiplier);
+            return (
+              <filter key={`${gradientNamespace}-${electrode.label}-blur`} id={`${gradientNamespace}-${electrode.label}-blur`}>
+                <feGaussianBlur stdDeviation={radius * 0.16} />
+              </filter>
+            );
+          })}
+        </defs>
+
+        <rect x="0" y="0" width="100" height="120" fill="#040816" />
+
+        {mode === "headmap" ? (
+          <>
+            <g opacity={0.95}>
+              <path d="M50 13 L46.6 20 H53.4 Z" fill="rgba(195,237,255,0.84)" />
+              <path d="M17 49 C13 53 13 67 17 71" fill="none" stroke="rgba(195,237,255,0.34)" strokeWidth="1.4" strokeLinecap="round" />
+              <path d="M83 49 C87 53 87 67 83 71" fill="none" stroke="rgba(195,237,255,0.34)" strokeWidth="1.4" strokeLinecap="round" />
+              <ellipse cx={HEAD.cx} cy={HEAD.cy} rx={HEAD.rx} ry={HEAD.ry} fill="rgba(8,16,32,0.84)" stroke="rgba(195,237,255,0.28)" strokeWidth="1.2" />
+              <ellipse cx={HEAD.cx} cy={HEAD.cy} rx={HEAD.rx - 3.8} ry={HEAD.ry - 4.2} fill="none" stroke="rgba(195,237,255,0.08)" strokeWidth="0.8" />
+            </g>
+
+            <g clipPath={`url(#${gradientNamespace}-head-clip)`}>
+              {activities.map((electrode) => (
+                <circle
+                  key={`${electrode.label}-blob`}
+                  cx={electrode.x}
+                  cy={electrode.y}
+                  r={getBlobRadius(mode, bandMode, electrode.activity, heatSpread * spreadMultiplier)}
+                  fill={`url(#${gradientNamespace}-${electrode.label})`}
+                  filter={`url(#${gradientNamespace}-${electrode.label}-blur)`}
+                />
+              ))}
+            </g>
+          </>
+        ) : (
+          <>
+            <g opacity={0.98}>
+              <path d={getCortexSurfacePath(1)} fill="rgba(16,24,44,0.88)" stroke="rgba(195,237,255,0.2)" strokeWidth="1.1" />
+              <path d={getCortexSurfacePath(innerScale)} fill="rgba(12,20,38,0.38)" stroke="rgba(195,237,255,0.08)" strokeWidth="0.8" />
+              <path d="M50 17 C49 28 49 40 50 52 C51 63 51 74 50 89" fill="none" stroke="rgba(195,237,255,0.12)" strokeWidth="0.9" strokeLinecap="round" />
+              <path d="M36 28 C30 38 30 54 36 66" fill="none" stroke="rgba(195,237,255,0.08)" strokeWidth="0.7" strokeLinecap="round" />
+              <path d="M64 28 C70 38 70 54 64 66" fill="none" stroke="rgba(195,237,255,0.08)" strokeWidth="0.7" strokeLinecap="round" />
+            </g>
+
+            <g clipPath={`url(#${gradientNamespace}-cortex-clip)`}>
+              {activities.map((electrode) => (
+                <circle
+                  key={`${electrode.label}-blob`}
+                  cx={electrode.x}
+                  cy={electrode.y}
+                  r={getBlobRadius(mode, bandMode, electrode.activity, heatSpread * spreadMultiplier)}
+                  fill={`url(#${gradientNamespace}-${electrode.label})`}
+                  filter={`url(#${gradientNamespace}-${electrode.label}-blur)`}
+                />
+              ))}
+            </g>
+          </>
+        )}
+
+        {activities.map((electrode) => {
+          const artifact = qualityByLabel.get(electrode.label)?.artifact;
+          const labelVisible = showLabels || hovered === electrode.label;
+          return (
+            <g
+              key={electrode.label}
+              onMouseEnter={() => setHovered(electrode.label)}
+              onMouseLeave={() => setHovered((current) => current === electrode.label ? null : current)}
+            >
+              <circle
+                cx={electrode.x}
+                cy={electrode.y}
+                r={mode === "headmap" ? 1.45 : 1.15}
+                fill={artifact ? "hsl(32 95% 60%)" : "rgba(230,242,255,0.95)"}
+                stroke={artifact ? "rgba(255,140,64,0.9)" : "rgba(7,14,25,0.92)"}
+                strokeWidth={artifact ? 0.8 : 0.55}
+              />
+              {labelVisible ? (
+                <>
+                  <rect
+                    x={electrode.x - 5.8}
+                    y={electrode.y - 8.9}
+                    width="11.6"
+                    height="4.5"
+                    rx="2.1"
+                    fill="rgba(6,10,20,0.86)"
+                    stroke="rgba(195,237,255,0.15)"
+                    strokeWidth="0.2"
+                  />
+                  <text
+                    x={electrode.x}
+                    y={electrode.y - 5.8}
+                    textAnchor="middle"
+                    fontSize="2.5"
+                    fontWeight="700"
+                    fill="rgba(236,244,255,0.95)"
+                  >
+                    {cleanLabel(electrode.label)}
+                  </text>
+                </>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
-function createCortexGeometry(side: "left" | "right") {
-  const geometry = new THREE.IcosahedronGeometry(0.94, 6);
-  const position = geometry.attributes.position;
-  const vector = new THREE.Vector3();
-  const direction = side === "left" ? -1 : 1;
-
-  for (let i = 0; i < position.count; i++) {
-    vector.fromBufferAttribute(position, i);
-    vector.x = Math.abs(vector.x) * direction;
-
-    const yBias = 1 - Math.abs(vector.y) * 0.18;
-    const zStretch = 1 + Math.max(0, -vector.z) * 0.1;
-    vector.y *= 0.92 * yBias;
-    vector.z *= 1.08 * zStretch;
-    vector.x *= 0.78;
-
-    const ridge =
-      Math.sin(vector.y * 15 + vector.z * 6) * 0.045 +
-      Math.cos(vector.z * 17 - vector.y * 4) * 0.032 +
-      Math.sin((vector.y + vector.x * 0.8) * 24) * 0.018;
-    const cleftFalloff = THREE.MathUtils.smoothstep(Math.abs(vector.x), 0.02, 0.32);
-    const radius = 1 + ridge * cleftFalloff;
-
-    vector.multiplyScalar(radius);
-    vector.x += direction * 0.02;
-    position.setXYZ(i, vector.x, vector.y, vector.z);
-  }
-
-  geometry.computeVertexNormals();
-  return geometry;
+function mapToHead(position: [number, number, number]) {
+  const [x, y, z] = position;
+  return {
+    x: 50 + x * 31.5,
+    y: 60 - z * 37 - y * 4.5,
+  };
 }
 
-function createCerebellumGeometry() {
-  const geometry = new THREE.IcosahedronGeometry(0.68, 4);
-  const position = geometry.attributes.position;
-  const vector = new THREE.Vector3();
-
-  for (let i = 0; i < position.count; i++) {
-    vector.fromBufferAttribute(position, i);
-    vector.y *= 0.74;
-    vector.z *= 0.92;
-    const ridge = Math.sin(vector.x * 18) * 0.03 + Math.cos(vector.y * 24 + vector.z * 8) * 0.018;
-    vector.multiplyScalar(1 + ridge);
-    position.setXYZ(i, vector.x, vector.y, vector.z);
-  }
-
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function sinkPosition(position: [number, number, number], inset: number): [number, number, number] {
-  const factor = 1 - inset;
-  return [position[0] * factor, position[1] * factor, position[2] * factor];
-}
-
-function extractVertexPositions(geometry: THREE.BufferGeometry) {
-  const attribute = geometry.attributes.position;
-  const points: [number, number, number][] = [];
-  for (let i = 0; i < attribute.count; i++) {
-    points.push([attribute.getX(i), attribute.getY(i), attribute.getZ(i)]);
-  }
-  ensureColorAttribute(geometry, attribute.count);
-  return points;
-}
-
-function ensureColorAttribute(geometry: THREE.BufferGeometry, count: number) {
-  if (!geometry.getAttribute("color")) {
-    geometry.setAttribute("color", new THREE.Float32BufferAttribute(count * 3, 3));
+function getBandPalette(bandMode: EEGBandMode) {
+  switch (bandMode) {
+    case "delta":
+      return { cool: "hsl(215 100% 66%)", hot: "hsl(195 100% 74%)" };
+    case "theta":
+      return { cool: "hsl(258 82% 68%)", hot: "hsl(220 100% 72%)" };
+    case "alpha":
+      return { cool: "hsl(188 100% 68%)", hot: "hsl(172 100% 72%)" };
+    case "beta":
+      return { cool: "hsl(164 88% 58%)", hot: "hsl(52 100% 64%)" };
+    case "gamma":
+      return { cool: "hsl(330 90% 68%)", hot: "hsl(8 100% 64%)" };
+    default:
+      return { cool: "hsl(195 100% 74%)", hot: "hsl(330 88% 72%)" };
   }
 }
 
-function applySurfaceHeat(
-  geometry: THREE.BufferGeometry,
-  vertices: [number, number, number][],
-  offset: [number, number, number],
-  scale: [number, number, number],
-  baseColor: THREE.Color,
-  electrodes: ElectrodeData[],
-  amplitudes: number[],
-  heatSpread: number,
+function getHeatColors(
+  palette: { cool: string; hot: string },
+  activity: number,
 ) {
-  const colorAttribute = geometry.getAttribute("color") as THREE.BufferAttribute;
-  const world = new THREE.Vector3();
-  const mixedColor = new THREE.Color();
-  const electrodePosition = new THREE.Vector3();
-
-  for (let i = 0; i < vertices.length; i++) {
-    const [x, y, z] = vertices[i];
-    world.set(x * scale[0] + offset[0], y * scale[1] + offset[1], z * scale[2] + offset[2]);
-
-    let heat = 0;
-    let totalWeight = 0;
-    for (let j = 0; j < electrodes.length; j++) {
-      const electrode = electrodes[j];
-      const amplitude = amplitudes[j] ?? 0;
-      if (amplitude <= 0) continue;
-      electrodePosition.set(...electrode.position);
-      const distance = world.distanceTo(electrodePosition);
-      const influence = Math.exp(-(distance * distance) / (0.055 * heatSpread));
-      heat += amplitude * influence;
-      totalWeight += influence;
-    }
-
-    const normalizedHeat = totalWeight > 0 ? THREE.MathUtils.clamp(heat / totalWeight, 0, 1) : 0;
-    mixedColor.copy(baseColor).lerp(getHeatColor(normalizedHeat), normalizedHeat * 0.92);
-    colorAttribute.setXYZ(i, mixedColor.r, mixedColor.g, mixedColor.b);
-  }
-
-  colorAttribute.needsUpdate = true;
+  return {
+    glowColor: activity < 0.55 ? palette.cool : palette.hot,
+    hotColor: activity < 0.8 ? palette.hot : "hsl(8 100% 68%)",
+  };
 }
 
-function getHeatColor(activity: number) {
-  const color = new THREE.Color();
-  if (activity < 0.33) {
-    color.setHSL(0.61 - activity * 0.16, 0.95, 0.52 + activity * 0.08);
-    return color;
+function getBandSpreadMultiplier(bandMode: EEGBandMode) {
+  switch (bandMode) {
+    case "delta":
+      return 1.26;
+    case "theta":
+      return 1.14;
+    case "alpha":
+      return 1;
+    case "beta":
+      return 0.92;
+    case "gamma":
+      return 0.78;
+    default:
+      return 1;
   }
-  if (activity < 0.66) {
-    const mid = (activity - 0.33) / 0.33;
-    color.setHSL(0.16 - mid * 0.07, 1, 0.56);
-    return color;
-  }
-  const hot = (activity - 0.66) / 0.34;
-  color.setHSL(0.06 - hot * 0.06, 1, 0.54 + hot * 0.08);
-  return color;
+}
+
+function getBlobRadius(
+  mode: "headmap" | "cortical",
+  bandMode: EEGBandMode,
+  activity: number,
+  spread: number,
+) {
+  const base = mode === "headmap" ? 8.5 : 6.2;
+  const bandBase = bandMode === "delta" ? 2.2 : bandMode === "gamma" ? -0.8 : 0;
+  return (base + bandBase + activity * (mode === "headmap" ? 10.5 : 8.5)) * spread;
+}
+
+function getCortexSurfacePath(scale: number) {
+  const left = [
+    `M ${50 - 24 * scale} ${22 + 4 * (1 - scale)}`,
+    `C ${50 - 36 * scale} ${31 + 2 * (1 - scale)}, ${50 - 34 * scale} ${79 - 4 * (1 - scale)}, ${50 - 16 * scale} ${91 - 2 * (1 - scale)}`,
+    `C ${50 - 6 * scale} ${96 - 1 * (1 - scale)}, ${50 - 3 * scale} ${76}, ${50 - 4 * scale} ${56}`,
+    `C ${50 - 5 * scale} ${37}, ${50 - 9 * scale} ${26}, ${50 - 24 * scale} ${22 + 4 * (1 - scale)}`,
+  ].join(" ");
+  const right = [
+    `M ${50 + 24 * scale} ${22 + 4 * (1 - scale)}`,
+    `C ${50 + 36 * scale} ${31 + 2 * (1 - scale)}, ${50 + 34 * scale} ${79 - 4 * (1 - scale)}, ${50 + 16 * scale} ${91 - 2 * (1 - scale)}`,
+    `C ${50 + 6 * scale} ${96 - 1 * (1 - scale)}, ${50 + 3 * scale} ${76}, ${50 + 4 * scale} ${56}`,
+    `C ${50 + 5 * scale} ${37}, ${50 + 9 * scale} ${26}, ${50 + 24 * scale} ${22 + 4 * (1 - scale)}`,
+  ].join(" ");
+  return `${left} ${right}`;
+}
+
+function getCortexClipPath(scale: number) {
+  return getCortexSurfacePath(scale);
+}
+
+function cleanLabel(label: string) {
+  return label.replace(/-REF|EEG /gi, "").slice(0, 8);
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
 }

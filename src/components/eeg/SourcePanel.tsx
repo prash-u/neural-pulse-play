@@ -56,12 +56,12 @@ export function SourcePanel({ onLoaded, onError }: Props) {
   };
 
   return (
-    <div className="glass-panel p-6 space-y-5">
+    <div className="space-y-5">
       <div>
         <p className="eyebrow">Signal source</p>
-        <h2 className="font-display text-2xl mt-1">Load a recording</h2>
+        <h2 className="font-display text-xl mt-1">Upload, then review</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Upload first for the most reliable workflow. Use bundled demos for instant exploration, and keep URL loading as an advanced fallback.
+          Use local upload first for reliability. Built-in demos are instant, and URL loading stays available as an advanced fallback.
         </p>
       </div>
 
@@ -87,7 +87,7 @@ export function SourcePanel({ onLoaded, onError }: Props) {
           <Upload className="h-4 w-4" /> Upload EEG file
         </button>
         <p className="text-[11px] text-muted-foreground">
-          Best MVP path: `.csv`, `.json`, `.txt`. EDF/BDF support can stay available without being the default.
+          Best starting formats: `.csv`, `.json`, `.txt`. EDF/BDF support can still be used later.
         </p>
       </div>
 
@@ -141,7 +141,7 @@ export function SourcePanel({ onLoaded, onError }: Props) {
             </button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Optional only. Old academic links can break, large files can stall, and browser CORS rules can block access.
+            External sources can fail because of CORS, huge downloads, unstable hosting, or inconsistent file formats.
           </p>
         </div>
       </details>

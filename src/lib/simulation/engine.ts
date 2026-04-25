@@ -21,6 +21,8 @@ export interface StimulationSettings {
   frequency: number;
   pulseWidth: number;
   radius: number;
+  noiseSeverity: number;
+  enabled: boolean;
   mode: SandboxMode;
   electrodeId: string;
 }
@@ -45,6 +47,7 @@ export interface SimulationMetrics {
   synchrony: number;
   tremorIndex: number;
   stimulationDose: number;
+  overloadRisk: number;
   networkEntropy: number;
 }
 
@@ -103,6 +106,8 @@ export function createBasalGangliaLoopPreset(): SimulationPreset {
       frequency: 130,
       pulseWidth: 90,
       radius: 0.42,
+      noiseSeverity: 0.62,
+      enabled: true,
       mode: "tremor",
       electrodeId: "dbs",
     },
@@ -122,9 +127,16 @@ export function createSimulationState(preset: SimulationPreset): SimulationState
 
 export function stepSimulation(state: SimulationState, dtMs: number): SimulationState {
   const elapsedMs = state.elapsedMs + dtMs;
-  const pulse = computePulseTrain(elapsedMs, state.stimulation.frequency, state.stimulation.pulseWidth);
+  const pulse = state.stimulation.enabled
+    ? computePulseTrain(elapsedMs, state.stimulation.frequency, state.stimulation.pulseWidth)
+    : 0;
   const stimNeuron = state.neurons.find((neuron) => neuron.id === state.stimulation.electrodeId);
   const inputByNeuron = new Map<string, number>();
+  const doseLoad = clamp(
+    (state.stimulation.amplitude * state.stimulation.frequency * state.stimulation.pulseWidth) / 18_000,
+    0,
+    1.6,
+  );
 
   for (const neuron of state.neurons) inputByNeuron.set(neuron.id, 0);
 
@@ -141,14 +153,23 @@ export function stepSimulation(state: SimulationState, dtMs: number): Simulation
     const distanceFalloff = 1 / (1 + Math.pow(distance / Math.max(0.08, state.stimulation.radius), 2.2));
     const stimulation = state.stimulation.amplitude * pulse * distanceFalloff;
     const networkInput = inputByNeuron.get(neuron.id) ?? 0;
-    const tremorNoise = state.stimulation.mode === "tremor"
-      ? Math.sin((elapsedMs / 1000) * 2 * Math.PI * 4.6 + neuron.x * 4.2) * 0.08
-      : Math.sin((elapsedMs / 1000) * 2 * Math.PI * 1.5 + neuron.x * 2.1) * 0.03;
-    const stabilization = state.stimulation.mode === "stabilized" ? 0.08 : 0;
+    const tremorScale = state.stimulation.mode === "tremor" ? 1 : 0.48;
+    const tremorNoise =
+      (
+        Math.sin((elapsedMs / 1000) * 2 * Math.PI * 4.6 + neuron.x * 4.2) * 0.07 +
+        Math.sin((elapsedMs / 1000) * 2 * Math.PI * 7.8 + neuron.y * 3.7) * 0.035
+      ) *
+      state.stimulation.noiseSeverity *
+      tremorScale;
+    const stabilization =
+      state.stimulation.enabled
+        ? clamp(state.stimulation.amplitude * state.stimulation.frequency / 1800, 0, 0.16) * distanceFalloff
+        : 0;
+    const overloadExcitation = doseLoad > 0.92 ? (doseLoad - 0.92) * 0.2 * (0.55 + distanceFalloff) : 0;
     const refractory = elapsedMs - neuron.lastFiredAt < neuron.refractoryMs;
     let activation = neuron.activation * (refractory ? 0.84 : 0.95);
 
-    activation += networkInput + tremorNoise + stimulation - stabilization;
+    activation += networkInput + tremorNoise + stimulation + overloadExcitation - stabilization;
     activation = clamp(activation, 0, 1.25);
 
     let lastFiredAt = neuron.lastFiredAt;
@@ -197,7 +218,18 @@ export function computeSimulationMetrics(state: SimulationState): SimulationMetr
   );
 
   const stimulationDose = clamp(
-    (state.stimulation.amplitude * state.stimulation.frequency * state.stimulation.pulseWidth * state.stimulation.radius) / 5000,
+    (state.stimulation.amplitude *
+      state.stimulation.frequency *
+      state.stimulation.pulseWidth *
+      state.stimulation.radius *
+      (state.stimulation.enabled ? 1 : 0.25)) / 5000,
+    0,
+    1,
+  );
+  const overloadRisk = clamp(
+    stimulationDose * 0.72 +
+      Math.max(0, mean - 0.58) * 0.85 +
+      state.stimulation.noiseSeverity * 0.16,
     0,
     1,
   );
@@ -209,6 +241,7 @@ export function computeSimulationMetrics(state: SimulationState): SimulationMetr
     synchrony,
     tremorIndex,
     stimulationDose,
+    overloadRisk,
     networkEntropy,
   };
 }
