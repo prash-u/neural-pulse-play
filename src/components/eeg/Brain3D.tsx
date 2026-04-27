@@ -27,6 +27,8 @@ interface ElectrodeData {
   artifact: boolean;
 }
 
+type CorticalCameraPreset = "overview" | "left" | "right" | "posterior";
+
 interface HeadElectrode {
   label: string;
   channelIdx: number;
@@ -61,7 +63,7 @@ function ReactiveBrainMesh({
     if (glowRef.current) {
       glowRef.current.scale.setScalar(1 + activity * 0.18);
       const material = glowRef.current.material as THREE.MeshBasicMaterial;
-      material.opacity = 0.06 + activity * 0.13;
+      material.opacity = 0.025 + activity * 0.065;
       material.color.copy(palette.glow);
     }
 
@@ -75,16 +77,16 @@ function ReactiveBrainMesh({
       );
       material.color.copy(palette.base).lerp(palette.hot, activity * 0.18);
       material.emissive.copy(palette.cool).lerp(palette.glow, activity * 0.5);
-      material.emissiveIntensity = 0.12 + activity * (index === 0 ? 1.15 : 1.3);
-      material.opacity = 0.32 + activity * 0.1;
+      material.emissiveIntensity = 0.035 + activity * (index === 0 ? 0.34 : 0.4);
+      material.opacity = 0.17 + activity * 0.05;
     });
 
     if (cerebellumRef.current) {
       const material = cerebellumRef.current.material as THREE.MeshPhysicalMaterial;
       material.color.copy(new THREE.Color("#5875a3")).lerp(palette.hot, activity * 0.12);
       material.emissive.copy(palette.cool);
-      material.emissiveIntensity = 0.05 + activity * 0.6;
-      material.opacity = 0.26 + activity * 0.07;
+      material.emissiveIntensity = 0.03 + activity * 0.18;
+      material.opacity = 0.14 + activity * 0.03;
     }
   });
 
@@ -100,12 +102,12 @@ function ReactiveBrainMesh({
         <meshPhysicalMaterial
           color={palette.base}
           transparent
-          opacity={0.36}
-          roughness={0.62}
-          transmission={0.06}
-          thickness={0.4}
+          opacity={0.18}
+          roughness={0.74}
+          transmission={0.03}
+          thickness={0.2}
           clearcoat={0.7}
-          clearcoatRoughness={0.55}
+          clearcoatRoughness={0.62}
         />
       </mesh>
 
@@ -114,12 +116,12 @@ function ReactiveBrainMesh({
         <meshPhysicalMaterial
           color={palette.base}
           transparent
-          opacity={0.36}
-          roughness={0.62}
-          transmission={0.06}
-          thickness={0.4}
+          opacity={0.18}
+          roughness={0.74}
+          transmission={0.03}
+          thickness={0.2}
           clearcoat={0.7}
-          clearcoatRoughness={0.55}
+          clearcoatRoughness={0.62}
         />
       </mesh>
 
@@ -134,7 +136,7 @@ function ReactiveBrainMesh({
 
       <mesh ref={cerebellumRef} position={[0, -0.55, -0.55]} scale={[0.62, 0.42, 0.42]}>
         <primitive object={cerebellumGeometry} attach="geometry" />
-        <meshPhysicalMaterial color="#5875a3" transparent opacity={0.3} roughness={0.76} clearcoat={0.45} />
+        <meshPhysicalMaterial color="#5875a3" transparent opacity={0.16} roughness={0.82} clearcoat={0.32} />
       </mesh>
     </group>
   );
@@ -190,26 +192,26 @@ function Electrode({
     if (materialRef.current) {
       materialRef.current.color.copy(artifact ? new THREE.Color("#ffe0b2") : palette.cool.clone().lerp(palette.hot, glow * 0.28));
       materialRef.current.emissive.copy(hueColor);
-      materialRef.current.emissiveIntensity = 0.35 + glow * 4.2;
+      materialRef.current.emissiveIntensity = 0.22 + glow * 2.1;
       materialRef.current.roughness = 0.16 + (1 - glow) * 0.22;
       materialRef.current.metalness = 0.18 + glow * 0.32;
     }
     if (lightRef.current) {
       lightRef.current.color.copy(hueColor);
-      lightRef.current.intensity = 0.28 + glow * 2.7;
-      lightRef.current.distance = 0.62 + glow * 0.95 * heatSpread;
+      lightRef.current.intensity = 0.1 + glow * 1.15;
+      lightRef.current.distance = 0.46 + glow * 0.55 * heatSpread;
     }
     if (haloRef.current) {
-      haloRef.current.scale.setScalar(0.85 + glow * 2.6 * heatSpread);
+      haloRef.current.scale.setScalar(0.68 + glow * 1.5 * heatSpread);
       const haloMaterial = haloRef.current.material as THREE.MeshBasicMaterial;
       haloMaterial.color.copy(hueColor);
-      haloMaterial.opacity = 0.04 + glow * 0.17;
+      haloMaterial.opacity = 0.018 + glow * 0.085;
     }
     if (beamRef.current) {
       beamRef.current.scale.set(1 + glow * 0.45, beamScale, 1 + glow * 0.45);
       const beamMaterial = beamRef.current.material as THREE.MeshBasicMaterial;
       beamMaterial.color.copy(hueColor);
-      beamMaterial.opacity = 0.04 + glow * 0.16;
+      beamMaterial.opacity = 0.014 + glow * 0.06;
     }
   });
 
@@ -339,6 +341,7 @@ function Scene({
   surfaceInset,
   heatSpread,
   palette,
+  cameraPreset,
 }: {
   electrodes: ElectrodeData[];
   amplitudes: number[];
@@ -347,6 +350,7 @@ function Scene({
   surfaceInset: number;
   heatSpread: number;
   palette: ReturnType<typeof getBandPalette>;
+  cameraPreset: CorticalCameraPreset;
 }) {
   const globalActivity = amplitudes.length
     ? amplitudes.reduce((sum, value) => sum + value, 0) / amplitudes.length
@@ -355,10 +359,10 @@ function Scene({
   return (
     <>
       <fog attach="fog" args={["#040816", 2.8, 6]} />
-      <ambientLight intensity={0.3 + globalActivity * 0.24} />
-      <pointLight position={[0, 1.4, 1.9]} intensity={0.9 + globalActivity * 1.2} color={palette.glow} />
-      <directionalLight position={[2, 3, 2]} intensity={0.78 + globalActivity * 0.55} color="#d8eeff" />
-      <directionalLight position={[-2, -1, -1]} intensity={0.2 + globalActivity * 0.28} color={palette.cool} />
+      <ambientLight intensity={0.22 + globalActivity * 0.1} />
+      <pointLight position={[0, 1.4, 1.9]} intensity={0.32 + globalActivity * 0.35} color={palette.glow} />
+      <directionalLight position={[2, 3, 2]} intensity={0.52 + globalActivity * 0.22} color="#d8eeff" />
+      <directionalLight position={[-2, -1, -1]} intensity={0.12 + globalActivity * 0.14} color={palette.cool} />
       <ReactiveBrainMesh globalActivity={globalActivity} palette={palette} />
       <HeatField electrodes={electrodes} amplitudes={amplitudes} palette={palette} heatSpread={heatSpread} />
       {electrodes.map((electrode, index) => (
@@ -374,6 +378,7 @@ function Scene({
           palette={palette}
         />
       ))}
+      <CameraPresetController preset={cameraPreset} />
       <OrbitControls enablePan={false} minDistance={2} maxDistance={5} rotateSpeed={0.72} />
     </>
   );
@@ -393,6 +398,7 @@ export function Brain3D({
 }: Props) {
   const gradientNamespace = useId();
   const [hovered, setHovered] = useState<string | null>(null);
+  const [cameraPreset, setCameraPreset] = useState<CorticalCameraPreset>("overview");
 
   const qualityByLabel = useMemo(() => new Map(quality.map((channel) => [channel.label, channel])), [quality]);
 
@@ -446,6 +452,12 @@ export function Brain3D({
   const spreadMultiplier = getBandSpreadMultiplier(bandMode);
 
   if (mode === "cortical") {
+    const averageActivity = amplitudes.length ? amplitudes.reduce((sum, value) => sum + value, 0) / amplitudes.length : 0;
+    const hotChannels = electrodes3D
+      .map((electrode, index) => ({ label: cleanLabel(electrode.label), activity: amplitudes[index] ?? 0 }))
+      .sort((a, b) => b.activity - a.activity)
+      .slice(0, 3);
+
     return (
       <div className="relative h-full w-full">
         <Canvas camera={{ position: [0, 0.4, 3], fov: 45 }} dpr={[1, 2]}>
@@ -458,8 +470,47 @@ export function Brain3D({
             surfaceInset={surfaceInset}
             heatSpread={heatSpread * spreadMultiplier}
             palette={palette}
+            cameraPreset={cameraPreset}
           />
         </Canvas>
+
+        <div className="pointer-events-none absolute left-4 top-4 flex flex-wrap gap-2">
+          <span className="status-chip !normal-case !tracking-normal">Cortical surface</span>
+          <span className="status-chip !normal-case !tracking-normal">Band {bandMode.toUpperCase()}</span>
+          <span className="status-chip !normal-case !tracking-normal">Mean activity {Math.round(averageActivity * 100)}%</span>
+        </div>
+
+        <div className="absolute bottom-4 left-4 flex flex-wrap gap-2">
+          {([
+            ["overview", "Overview"],
+            ["left", "Left"],
+            ["right", "Right"],
+            ["posterior", "Posterior"],
+          ] as const).map(([preset, label]) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => setCameraPreset(preset)}
+              className={`rounded-full border px-3 py-2 text-xs font-semibold transition-colors ${
+                cameraPreset === preset ? "border-primary/40 bg-primary/15 text-primary" : "border-white/10 bg-[rgba(4,8,22,0.72)] text-muted-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="pointer-events-none absolute right-4 top-4 w-[12rem] rounded-[1.15rem] border border-white/10 bg-[rgba(4,8,22,0.74)] p-4 backdrop-blur-xl">
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">Hot channels</div>
+          <div className="mt-3 grid gap-2">
+            {hotChannels.map((channel) => (
+              <div key={channel.label} className="flex items-center justify-between gap-3 text-sm">
+                <span className="font-semibold text-foreground">{channel.label}</span>
+                <span className="font-mono text-muted-foreground">{Math.round(channel.activity * 100)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -649,6 +700,24 @@ function cleanLabel(label: string) {
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
+}
+
+function CameraPresetController({
+  preset,
+}: {
+  preset: CorticalCameraPreset;
+}) {
+  useFrame((state, delta) => {
+    const targets: Record<CorticalCameraPreset, THREE.Vector3> = {
+      overview: new THREE.Vector3(0, 0.4, 3),
+      left: new THREE.Vector3(-2.6, 0.2, 1.7),
+      right: new THREE.Vector3(2.6, 0.2, 1.7),
+      posterior: new THREE.Vector3(0, 0.1, -3.1),
+    };
+    state.camera.position.lerp(targets[preset], 1 - Math.exp(-delta * 3.6));
+    state.camera.lookAt(0, 0, 0);
+  });
+  return null;
 }
 
 function createHemisphereGeometry() {
