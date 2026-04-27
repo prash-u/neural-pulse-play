@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, Brain, Download, Gauge, SlidersHorizontal, Sparkles, Waves, Zap } from "lucide-react";
+import { Activity, Brain, Download, Gauge, Sparkles, Waves, Zap } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { DBSSandbox } from "@/components/dbs/DBSSandbox";
 import { Brain3D } from "@/components/eeg/Brain3D";
@@ -131,7 +131,7 @@ const Index = () => {
     metrics: reviewMetrics
       ? `Sync ${Math.round(reviewMetrics.synchrony * 100)}% • Artifacts ${reviewMetrics.artifactCount}`
       : "Awaiting review metrics",
-    visual: `${mapMode === "headmap" ? "Head map" : "Cortical"} • Gain ${signalGain.toFixed(2)}× • Spread ${heatSpread.toFixed(2)}×`,
+    visual: `${mapMode === "headmap" ? "Head map" : "Cortical"} • Gain ${signalGain.toFixed(2)}× • Labels ${showLabels ? "on" : "hover"}`,
     quality:
       quality.length > 0
         ? `${quality.filter((channel) => channel.artifact).length} flagged • ${quality.length} tracked`
@@ -174,16 +174,6 @@ const Index = () => {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {workspaceMode === "review" ? (
-            <button
-              type="button"
-              onClick={() => setShowLabels((value) => !value)}
-              className="pill-button pill-button-secondary !min-h-[40px]"
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-              {showLabels ? "Hide electrode labels" : "Show electrode labels"}
-            </button>
-          ) : null}
           <button type="button" onClick={exportJSON} className="pill-button pill-button-secondary !min-h-[40px]" disabled={!recording}>
             <Download className="h-4 w-4" />
             Export session
@@ -198,7 +188,7 @@ const Index = () => {
               <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className="eyebrow">Waveform review</p>
-                  <h2 className="font-display mt-1 text-[clamp(1.35rem,2vw,1.85rem)]">Scrolling EEG pane</h2>
+                  <h2 className="font-display mt-1 text-[clamp(1.35rem,2vw,1.85rem)]">Clinical waveform browser</h2>
                   {activeRecording ? (
                     <p className="mt-1 text-sm text-muted-foreground">
                       {activeRecording.name} • {montageMode} montage • {referenceMode} reference • smoothing {Math.round(smoothing * 1000)} ms
@@ -224,8 +214,17 @@ const Index = () => {
                 </div>
               </header>
 
+              <ProcessingSummaryStrip
+                recording={activeRecording}
+                bandMode={bandMode}
+                referenceMode={referenceMode}
+                montageMode={montageMode}
+                smoothing={smoothing}
+                artifactCount={reviewMetrics?.artifactCount ?? 0}
+              />
+
               <div
-                className="overflow-hidden rounded-[1.6rem] border"
+                className="mt-4 overflow-hidden rounded-[1.6rem] border"
                 style={{ borderColor: "hsl(215 30% 70% / 0.14)", background: "#040816", height: "clamp(250px, 34vh, 340px)" }}
               >
                 {activeRecording ? (
@@ -263,7 +262,9 @@ const Index = () => {
                     {mapMode === "headmap" ? "Top-down EEG head map" : "Cortical surface map"}
                   </h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Activity is interpolated from standard 10-20 positions and colored by the active band review settings.
+                    {mapMode === "headmap"
+                      ? "Activity is interpolated from standard 10-20 positions and colored by the active band review settings."
+                      : "Orbital cortical inspection with fixed anatomical viewpoints and activity flowing across the surface field."}
                   </p>
                 </div>
 
@@ -319,7 +320,7 @@ const Index = () => {
 
                 <RailSection
                   value="review-controls"
-                  title="Review Controls"
+                  title="Processing"
                   summary={sectionSummary.controls}
                 >
                   <ReviewControls
@@ -338,7 +339,7 @@ const Index = () => {
 
                 <RailSection
                   value="review-metrics"
-                  title="Review Metrics"
+                  title="Session State"
                   summary={sectionSummary.metrics}
                 >
                   <ReviewMetricsCard
@@ -352,16 +353,14 @@ const Index = () => {
 
                 <RailSection
                   value="visualisation-controls"
-                  title="Visualisation Controls"
+                  title="Display"
                   summary={sectionSummary.visual}
                 >
                   <VisualizationControls
-                    mapMode={mapMode}
                     showLabels={showLabels}
                     signalGain={signalGain}
                     heatSpread={heatSpread}
                     surfaceInset={surfaceInset}
-                    onMapModeChange={setMapMode}
                     onShowLabelsChange={setShowLabels}
                     onSignalGainChange={setSignalGain}
                     onHeatSpreadChange={setHeatSpread}
@@ -371,7 +370,7 @@ const Index = () => {
 
                 <RailSection
                   value="channel-quality"
-                  title="Channel Quality"
+                  title="Channel QA"
                   summary={sectionSummary.quality}
                 >
                   <ChannelQualityCard recording={activeRecording} quality={quality} />
@@ -417,6 +416,42 @@ function RailSection({
   );
 }
 
+function ProcessingSummaryStrip({
+  recording,
+  bandMode,
+  referenceMode,
+  montageMode,
+  smoothing,
+  artifactCount,
+}: {
+  recording: EEGRecording | null;
+  bandMode: EEGBandMode;
+  referenceMode: EEGReferenceMode;
+  montageMode: EEGMontageMode;
+  smoothing: number;
+  artifactCount: number;
+}) {
+  const items = [
+    { label: "Dataset", value: recording?.name ?? "No recording" },
+    { label: "Band", value: bandMode.toUpperCase() },
+    { label: "Reference", value: referenceMode === "average" ? "Average" : "Raw" },
+    { label: "Montage", value: montageMode === "referential" ? "Referential" : "Bipolar" },
+    { label: "Smoothing", value: `${Math.round(smoothing * 1000)} ms` },
+    { label: "Artifacts", value: `${artifactCount}` },
+  ];
+
+  return (
+    <div className="grid gap-2 rounded-[1.35rem] border border-white/10 bg-white/[0.035] p-3 md:grid-cols-3 xl:grid-cols-6">
+      {items.map((item) => (
+        <div key={item.label} className="rounded-[1rem] border border-white/8 bg-[#07101d] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{item.label}</div>
+          <div className="mt-1 truncate text-sm font-semibold text-foreground">{item.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ReviewControls({
   bandMode,
   referenceMode,
@@ -442,12 +477,8 @@ function ReviewControls({
 }) {
   return (
     <div className="space-y-4">
-      <div>
-        <p className="eyebrow">Review controls</p>
-        <h3 className="font-display mt-1 text-lg">Band, montage, and artifact pipeline</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Every control below feeds directly into the waveform review and the head map.
-        </p>
+      <div className="rounded-[1rem] border border-white/8 bg-white/[0.035] px-3 py-2 text-xs text-muted-foreground">
+        Processing order: reference and montage reshape the traces first, then smoothing and artifact screening clean the review frame.
       </div>
 
       <div className="space-y-2">
@@ -526,12 +557,6 @@ function ReviewMetricsCard({
 }) {
   return (
     <div className="space-y-4">
-      <div>
-        <p className="eyebrow">Review metrics</p>
-        <h3 className="font-display mt-1 text-lg">Session quality and synchrony</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Compact feedback for the current playback frame.</p>
-      </div>
-
       {error ? <div className="status-chip error w-full justify-start !normal-case !tracking-normal">{error}</div> : null}
 
       <div className="grid gap-3">
@@ -555,23 +580,19 @@ function ReviewMetricsCard({
 }
 
 function VisualizationControls({
-  mapMode,
   showLabels,
   signalGain,
   heatSpread,
   surfaceInset,
-  onMapModeChange,
   onShowLabelsChange,
   onSignalGainChange,
   onHeatSpreadChange,
   onSurfaceInsetChange,
 }: {
-  mapMode: MapMode;
   showLabels: boolean;
   signalGain: number;
   heatSpread: number;
   surfaceInset: number;
-  onMapModeChange: (value: MapMode) => void;
   onShowLabelsChange: (value: boolean) => void;
   onSignalGainChange: (value: number) => void;
   onHeatSpreadChange: (value: number) => void;
@@ -579,23 +600,9 @@ function VisualizationControls({
 }) {
   return (
     <div className="space-y-4">
-      <div>
-        <p className="eyebrow">Visualisation controls</p>
-        <h3 className="font-display mt-1 text-lg">Heat map tuning</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Gain affects waveform amplitude and heat intensity, while spread and inset reshape the map immediately.
-        </p>
+      <div className="rounded-[1rem] border border-white/8 bg-white/[0.035] px-3 py-2 text-xs text-muted-foreground">
+        Display tuning affects the waveform gain, head-map spread, and how deeply cortical contacts sit in the 3D surface.
       </div>
-
-      <ToggleRow
-        label="Map mode"
-        options={[
-          { value: "headmap", label: "Head map" },
-          { value: "cortical", label: "Cortical surface" },
-        ]}
-        currentValue={mapMode}
-        onChange={(value) => onMapModeChange(value as MapMode)}
-      />
 
       <ToggleRow
         label="Electrode labels"
@@ -655,11 +662,6 @@ function ChannelQualityCard({
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="eyebrow">Channel quality</p>
-        <h3 className="font-display mt-1 text-lg">Resolved channels</h3>
-      </div>
-
       <div className="flex flex-wrap gap-1.5">
         {recording.channels.map((channel) => (
           <span
